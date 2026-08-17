@@ -44,12 +44,54 @@ local inference POC via `HF_REALTIME_CONNECTION_MODE=local` +
    ./run.sh --no-camera   # audio-only
    ```
 
-## Data & backup
+## Operations (day-to-day, no desktop app needed)
 
-- Journal DB: `data/memoire.db` (gitignored). The loaner robot gets wiped —
-  back it up: `scp pollen@reachy-mini.local:.../data/memoire.db backups/`.
-- Facts store: upstream `memory.v1.json` in
-  `~/.local/share/reachy_mini_conversation_app/`.
+The Pollen desktop app is **only** a convenience for wifi provisioning and app
+management — nothing here depends on it. Everything talks straight to the
+robot's daemon (REST + WebSocket on port 8000, autostarted at boot by
+`reachy-mini-daemon.service`).
+
+**Every startup is just:**
+
+1. Power the robot on. It auto-joins any known wifi (list at
+   `http://<robot>:8000/wifi/status`); if none is reachable it falls back to
+   its own hotspot (10.42.0.x) where you provision wifi once via the built-in
+   dashboard on port 8000 — no desktop app required.
+2. `./run.sh --ui` on the laptop. The script resolves the robot, wakes the
+   daemon's media stack, applies the signalling workaround, and starts the
+   conversation app (web UI + transcript at http://localhost:7860).
+
+Wifi is required only for laptop↔robot transport and the HF cloud backend —
+the robot has no other network dependency at runtime.
+
+**Verified working (2026-08-17):** robot connection, WebRTC bidirectional
+audio, camera (`scripts/camera_check.py` grabs a JPEG frame), profile +
+journal tools loading, realtime session + French greeting.
+
+### Known gotchas
+
+- Daemon 1.8.3 reports its **hotspot IP** (10.42.0.1) as `wlan_ip` even when
+  on home wifi → the SDK dials WebRTC signalling on an unroutable address and
+  times out. `run.sh` works around it via `REACHY_SIGNALLING_HOST` +
+  `scripts/launch_patched.py`.
+- If WebRTC still times out, check the signalling server:
+  `curl -X POST http://<robot>:8000/api/media/acquire` then verify port 8443
+  is open.
+- SDK 1.10.0rc5 vs daemon 1.8.3 version-mismatch warning is benign so far;
+  the daemon offers a 1.9.0 self-update (`GET /update/available`) if it ever
+  isn't.
+
+## Where things are logged / stored
+
+| What | Where |
+|---|---|
+| App run logs (full console output) | `logs/run-<timestamp>.log` (+ `logs/latest.log` symlink), gitignored |
+| Care journal (visits, meals, meds, mood) | `data/memoire.db` (SQLite), gitignored |
+| Long-term facts (`remember` tool) | `~/.local/share/reachy_mini_conversation_app/memory.v1.json` |
+| Robot-side daemon logs | on the robot: `journalctl -u reachy-mini-daemon` (ssh `pollen@reachy-mini.local`) |
+
+The loaner robot gets wiped at loan end — nothing irreplaceable lives on it;
+everything above is laptop-side except the daemon logs.
 
 ## Roadmap
 
