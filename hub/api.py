@@ -4,11 +4,11 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
-from . import auth, db, pages
+from . import auth, db, pages, speech
 from .state import HubState
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ def load_phrases() -> list[str]:
 
 class SayBody(BaseModel):
     text: str
+    mode: str = "tts"  # "tts" = verbatim robot-speaker playback, "ai" = injected turn
 
 
 def build_app(state: HubState) -> FastAPI:
@@ -88,15 +89,41 @@ def build_app(state: HubState) -> FastAPI:
         if len(text) > 400:
             raise HTTPException(status_code=422, detail="message trop long (400 max)")
         limiter.check("say", person, 5.0)
-        prompt = (
-            f"{person.capitalize()} envoie ce message par téléphone. "
-            f"Dis-le à voix haute en le citant fidèlement : « {text} »"
-        )
         try:
-            await state.say(prompt)
+            if body.mode == "ai":
+                await state.say(
+                    f"{person.capitalize()} envoie ce message par téléphone. "
+                    f"Dis-le à voix haute en le citant fidèlement : « {text} »"
+                )
+            else:
+                intro = await speech.tts_to_wav(f"Message de {person}.")
+                wav = await speech.tts_to_wav(text)
+                await state.play_file(intro)
+                await state.play_file(wav)
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
         db.log_transcript("remote", f"[{person}] {text}", state.run_id)
+        return {"ok": True}
+
+    @app.post("/api/voice")
+    async def voice(file: UploadFile, person: str = Depends(auth.require_person)) -> dict:
+        """Play an uploaded voice message (the person's real voice) on the robot."""
+        limiter.check("voice", person, 5.0)
+        data = await file.read()
+        suffix = Path(file.filename or "msg.webm").suffix or ".webm"
+        try:
+            wav = speech.voice_message_to_wav(data, suffix, person)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        except RuntimeError as e:
+            raise HTTPException(status_code=422, detail=f"format audio non reconnu ({e})") from e
+        try:
+            intro = await speech.tts_to_wav(f"Message de {person}.")
+            await state.play_file(intro)
+            await state.play_file(wav)
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        db.log_transcript("remote", f"[{person}] (message vocal)", state.run_id)
         return {"ok": True}
 
     @app.post("/api/view/start")
@@ -107,10 +134,8 @@ def build_app(state: HubState) -> FastAPI:
         except HTTPException:
             return {"ok": True, "announced": False}
         try:
-            await state.say(
-                f"Signale gentiment, en une phrase, que {person.capitalize()} "
-                "regarde en ce moment à travers tes yeux."
-            )
+            wav = await speech.tts_to_wav(f"{person.capitalize()} nous regarde par mes yeux.")
+            await state.play_file(wav)
         except RuntimeError:
             return {"ok": True, "announced": False}
         return {"ok": True, "announced": True}

@@ -33,10 +33,18 @@ by `run.sh` automatically). It is deliberately separate from the upstream UI
 on :7860: the hub is token-authenticated and is the only thing you may ever
 expose to the internet.
 
-- **`/famille`** — phone page for a remote relative: watch through Reachy's
-  camera (snapshot every 2.5 s; Reachy politely announces who is watching) and
-  make Reachy speak a message aloud (free text or tap a canned phrase from
-  `data/phrases.json`). Add-to-homescreen on iPhone/Android → feels like an app.
+- **`/famille`** — phone page for a remote relative, designed senior-first
+  (three huge buttons, big type, one thing at a time):
+  - **🎙️ voice message**: tap, speak, tap — her *actual voice* plays on the
+    robot's speaker (MediaRecorder upload → ffmpeg → WAV → daemon
+    `play_sound`), prefixed by a short "Message de X." announcement.
+    Needs HTTPS (funnel) or localhost — browsers block the mic on plain HTTP.
+  - **👁 watch**: camera snapshot every 2.5 s; Reachy announces who is watching.
+  - **✏️ written message**: spoken **verbatim** on the robot speaker via
+    edge-tts (default voice `fr-FR-DeniseNeural`, override `MEMOIRE_TTS_VOICE`;
+    synth cached in `data/tts_cache/`). `{"mode": "ai"}` on `/api/say` keeps
+    the old behavior (injected turn, the model voices it in its own voice).
+  Add-to-homescreen on iPhone/Android → feels like an app.
 - **`/care`** — caregiver dashboard: conversation volume per day, mood entries,
   the day's care journal, and **repeated questions/phrases over 30 days with a
   week-over-week trend** — the honest "what is he forgetting" signal (fuzzy
@@ -53,9 +61,8 @@ expose to the internet.
 
 Tokens live in `data/hub_tokens.json` (gitignored). Opening
 `/famille?t=<token>` once stores it as a cookie on the phone. Per-person rate
-limits on say/snapshot; `/api/say` capped at 400 chars. Note: `say` is an
-*injected turn* — the model voices the message (faithfully quoted in the
-prompt), it is not guaranteed-verbatim TTS.
+limits on say/snapshot/voice; `/api/say` capped at 400 chars, voice uploads
+at 8 MB.
 
 ### Remote access (family outside the LAN)
 
@@ -74,8 +81,10 @@ tailscale isn't installed on this laptop.)
 
    ```bash
    uv venv --python python3.12 .venv && source .venv/bin/activate
-   uv pip install git+https://github.com/pollen-robotics/reachy_mini_conversation_app
+   uv pip install git+https://github.com/pollen-robotics/reachy_mini_conversation_app edge-tts
    ```
+
+   `ffmpeg` must be on PATH (hub TTS + voice-message conversion).
 
 2. Authenticate: `hf auth login` (or `export HF_TOKEN=...`).
 
@@ -131,6 +140,7 @@ journal tools loading, realtime session + French greeting.
 | Care journal (visits, meals, meds, mood) | `data/memoire.db` (SQLite), gitignored |
 | Conversation transcripts (final turns) | `data/memoire.db`, `transcript` table |
 | Hub access tokens / canned phrases | `data/hub_tokens.json` / `data/phrases.json`, gitignored |
+| TTS cache / voice messages | `data/tts_cache/` / `data/voicemail/`, gitignored |
 | Long-term facts (`remember` tool) | `~/.local/share/reachy_mini_conversation_app/memory.v1.json` |
 | Robot-side daemon logs | on the robot: `journalctl -u reachy-mini-daemon` (ssh `pollen@reachy-mini.local`) |
 

@@ -42,6 +42,23 @@ class HubState:
         except Exception:
             return False
 
+    async def play_file(self, path: str) -> None:
+        """Play a local audio file on the robot speaker (upload + daemon REST,
+        via SDK ``media.play_sound``). Independent of the realtime session.
+        Barges in on any assistant speech first.
+        """
+        robot = self.robot()
+        if robot is None or getattr(robot, "media", None) is None:
+            raise RuntimeError("robot media unavailable")
+        stream = self.stream
+        if stream is not None:
+            try:
+                stream.clear_audio_queue()
+            except Exception:
+                pass
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, robot.media.play_sound, str(path))
+
     async def say(self, text: str) -> None:
         """Barge in and voice ``text`` (injected turn, mirrors upstream's
         conversation.say RPC). Cross-loop safe: the hub server runs its own

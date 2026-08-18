@@ -67,6 +67,28 @@ Remote access: `scripts/expose.sh` → Tailscale Funnel of :7870 (preferred,
 stable URL) or `--cloudflared` quick tunnel. **Neither installed locally yet —
 tunnel path untested.** Never funnel :7860.
 
+### Verbatim speech (2026-08-18, same day)
+
+`hub/speech.py`: edge-tts → mp3 → ffmpeg → mono 44.1k WAV, cached by
+voice+text hash; voice-message uploads (webm/mp4/ogg from MediaRecorder)
+converted the same way. Playback = SDK `media.play_sound(file)` which uploads
+to the daemon and POSTs `/api/media/play_sound` — **independent of the
+realtime session** (works while the model is idle; `/api/say` tts mode and
+`/api/voice` both work with no session up, tested). Barge-in still clears the
+assistant audio queue first.
+
+- `/api/say` default `mode="tts"` = verbatim; `mode="ai"` = old injected turn.
+- `/api/voice` = grandma's REAL voice on the robot — chosen over voice
+  cloning: simpler, authentic, no training data needed. True cloning (XTTS-v2
+  fine-tuned on her samples, local) is a phase-2 candidate if TTS-voice
+  messages feel too robotic.
+- Both prefixed by a TTS "Message de X." so grandpa knows who speaks.
+- getUserMedia requires HTTPS → recording works through the funnel or
+  localhost only; plain `http://<lan-ip>` shows mic-refused.
+- Caveat not yet measured live: robot mic hears the played message — the
+  model may respond to it. If annoying, mute mic during playback
+  (`LocalStream._mic_muted`) — left for the live test.
+
 - [x] M1 transcript logging (tested: unit)
 - [x] M2 hub routes + dashboard v1 + famille page (tested: 26-check suite,
       stubbed robot/handler — `tests/test_hub.py`)

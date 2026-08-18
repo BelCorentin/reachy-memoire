@@ -96,12 +96,19 @@ class StubHandler:
 
 
 class StubMedia:
+    def __init__(self):
+        self.played: list[str] = []
+
     def get_frame_jpeg(self):
         return b"\xff\xd8fakejpeg"
 
+    def play_sound(self, path):
+        self.played.append(path)
+
 
 class StubRobot:
-    media = StubMedia()
+    def __init__(self):
+        self.media = StubMedia()
 
 
 class StubStream:
@@ -119,6 +126,24 @@ state = HubState()
 stream = StubStream()
 state.attach(stream)
 
+# stub TTS: no network in tests; write a real file so play_file gets a path
+from hub import speech  # noqa: E402
+
+_tts_calls: list[str] = []
+
+
+async def _fake_tts(text):
+    _tts_calls.append(text)
+    p = Path(TMP) / "fake_tts.wav"
+    p.write_bytes(b"RIFFfake")
+    return p
+
+
+speech.tts_to_wav = _fake_tts
+import hub.api as hub_api  # noqa: E402
+
+hub_api.speech.tts_to_wav = _fake_tts
+
 tokens_file = Path(TMP) / "hub_tokens.json"
 tokens_file.write_text(json.dumps({"mamie": "secret-mamie", "celine": "secret-celine"}))
 
@@ -133,15 +158,38 @@ ok(r.status_code == 200 and "Mamie" in r.text, "famille page renders with name")
 ok("memoire_hub" in r.cookies, "?t= sets auth cookie")
 
 hdr = {"Authorization": "Bearer secret-mamie"}
+media = stream._robot.media
 r = client.post("/api/say", json={"text": "Bonjour Papi !"}, headers=hdr)
-ok(r.status_code == 200, "say accepted")
-ok(stream.cleared == 1, "say barged in (audio queue cleared)")
-ok(any("Bonjour Papi" in s and "Mamie" in s for s in stream.handler.said),
-   "say wraps message with sender name")
+ok(r.status_code == 200, "say (tts mode, default) accepted")
+ok(len(media.played) == 2, "verbatim tts: intro + message played on robot speaker")
+ok(any("Bonjour Papi" in t for t in _tts_calls), "message text went through TTS")
+ok(any("Message de mamie" in t for t in _tts_calls), "sender announced before message")
+ok(stream.cleared >= 1, "playback barged in (audio queue cleared)")
+ok(stream.handler.said == [], "tts mode never goes through the model")
 r = client.post("/api/say", json={"text": "encore"}, headers=hdr)
 ok(r.status_code == 429, "say rate-limited (5s)")
 r = client.post("/api/say", json={"text": "x" * 500}, headers=hdr)
 ok(r.status_code == 422, "say length-capped")
+r = client.post("/api/say", json={"text": "Coucou", "mode": "ai"},
+                headers={"Authorization": "Bearer secret-celine"})
+ok(r.status_code == 200 and any("Coucou" in s and "Celine" in s for s in stream.handler.said),
+   "ai mode = injected turn with sender name")
+
+# voice message: real ffmpeg conversion of a generated ogg
+import subprocess
+src = Path(TMP) / "voice.ogg"
+subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                "-i", "sine=frequency=440:duration=0.3", "-c:a", "libvorbis", str(src)],
+               check=True)
+media.played.clear()
+with open(src, "rb") as f:
+    r = client.post("/api/voice", files={"file": ("message.ogg", f, "audio/ogg")}, headers=hdr)
+ok(r.status_code == 200, "voice message accepted")
+ok(len(media.played) == 2 and media.played[1].endswith(".wav"),
+   "voice message converted to wav and played after intro")
+r = client.post("/api/voice", files={"file": ("m.webm", b"notaudio", "audio/webm")},
+                headers={"Authorization": "Bearer secret-celine"})
+ok(r.status_code == 422, "garbage voice upload rejected")
 
 r = client.get("/api/snapshot", headers=hdr)
 ok(r.status_code == 200 and r.content.startswith(b"\xff\xd8"), "snapshot returns jpeg")
@@ -155,10 +203,22 @@ r = client.get("/api/care/summary", headers=hdr)
 ok(r.status_code == 200 and len(r.json()["daily"]) == 14, "summary json")
 ok(client.get("/api/phrases", headers=hdr).status_code == 200, "phrases endpoint")
 
-# disconnected session → 503
+# disconnected session: ai mode → 503, tts mode still works (session-independent)
+import time as _time
+
+_time.sleep(1.1)  # clear celine's say rate-limit window is 5s; use mamie after hers expired
 stream.handler._is_connected = lambda: False
-r = client.post("/api/say", json={"text": "test"},
+r = client.post("/api/say", json={"text": "test", "mode": "ai"},
                 headers={"Authorization": "Bearer secret-celine"})
-ok(r.status_code == 503, "say without session → 503")
+ok(r.status_code in (429, 503), "ai mode without session rejected")
+if r.status_code == 429:
+    _time.sleep(5)
+    r = client.post("/api/say", json={"text": "test", "mode": "ai"},
+                    headers={"Authorization": "Bearer secret-celine"})
+    ok(r.status_code == 503, "ai mode without session → 503")
+media.played.clear()
+_time.sleep(5)
+r = client.post("/api/say", json={"text": "toujours là"}, headers=hdr)
+ok(r.status_code == 200 and len(media.played) == 2, "tts mode works without session")
 
 print(f"\nALL {PASSED} CHECKS PASSED")

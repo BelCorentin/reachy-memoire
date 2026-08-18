@@ -26,95 +26,142 @@ button { font-size: 1.05rem; border: 0; border-radius: 12px; padding: 12px 18px;
 
 
 def famille_page(person: str) -> str:
-    """Grandma's page: see through Reachy + make him speak."""
+    """Grandma's page, designed for an older user: three huge actions
+    (voice message, watch, written message), big type, high contrast,
+    one thing at a time, plain-words feedback.
+    """
     p = html.escape(person.capitalize())
     return f"""<!doctype html>
 <html lang="fr"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Reachy — Famille</title>
-<style>{_BASE_CSS}
-#snap {{ width: 100%; border-radius: 12px; background: #ddd; min-height: 200px; }}
-#viewBtn {{ background: #4a7c59; color: #fff; width: 100%; }}
-#sayBtn {{ background: #b5651d; color: #fff; width: 100%; margin-top: 8px; }}
-textarea {{ width: 100%; font-size: 1.1rem; border-radius: 10px; border: 1px solid #ccc;
-           padding: 10px; min-height: 70px; }}
-.chip {{ background: #eee4d4; border-radius: 999px; padding: 8px 14px; margin: 4px 4px 0 0;
-        display: inline-block; font-size: .95rem; cursor: pointer; }}
+<style>
+* {{ box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }}
+body {{ font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #fffdf7;
+       color: #1a1a1a; padding: 14px; max-width: 560px; margin: 0 auto;
+       font-size: 20px; line-height: 1.4; }}
+h1 {{ font-size: 1.5rem; text-align: center; margin: 6px 0 18px; }}
+.big {{ display: block; width: 100%; border: 0; border-radius: 20px; padding: 22px;
+       font-size: 1.5rem; font-weight: 700; color: #fff; cursor: pointer;
+       margin-bottom: 16px; box-shadow: 0 3px 6px rgba(0,0,0,.2); }}
+.big:active {{ transform: scale(.98); }}
+#recBtn {{ background: #c0392b; }}
+#recBtn.recording {{ background: #7b241c; animation: pulse 1s infinite; }}
+#viewBtn {{ background: #1e6641; }}
+#writeBtn {{ background: #8a5a00; }}
+@keyframes pulse {{ 50% {{ opacity: .75; }} }}
+#snap {{ width: 100%; border-radius: 16px; margin-bottom: 12px; display: none; }}
+#writeZone {{ display: none; }}
+textarea {{ width: 100%; font-size: 1.4rem; border-radius: 14px; border: 2px solid #999;
+           padding: 14px; min-height: 90px; margin-bottom: 10px; }}
+.chip {{ display: block; width: 100%; background: #f2e8d5; border: 2px solid #d9c9a3;
+        border-radius: 14px; padding: 14px; margin-bottom: 8px; font-size: 1.15rem;
+        text-align: left; cursor: pointer; }}
+#status {{ text-align: center; font-size: 1.3rem; min-height: 2.2rem; margin: 10px 0;
+          font-weight: 600; }}
+.good {{ color: #1e6641; }} .bad {{ color: #b03a2e; }}
 </style></head><body>
-<h1>🤖 Reachy — bonjour {p} !</h1>
+<h1>🤖 Bonjour {p} !</h1>
+<div id="status"></div>
 
-<div class="card">
-  <h2>👁 Voir par les yeux de Reachy</h2>
-  <img id="snap" alt="" hidden>
-  <button id="viewBtn">Regarder</button>
-  <div class="status" id="viewStatus"></div>
-</div>
+<button class="big" id="recBtn">🎙️ Parler à Reachy<br>
+<span style="font-size:1rem;font-weight:400">Appuyez, parlez, réappuyez pour envoyer</span></button>
 
-<div class="card">
-  <h2>💬 Faire parler Reachy</h2>
+<img id="snap" alt="Ce que voit Reachy">
+<button class="big" id="viewBtn">👁 Voir la maison</button>
+
+<button class="big" id="writeBtn">✏️ Écrire un message</button>
+<div id="writeZone">
   <div id="phrases"></div>
-  <textarea id="msg" placeholder="Écrivez un petit message…"></textarea>
-  <button id="sayBtn">Envoyer 📣</button>
-  <div class="status" id="sayStatus"></div>
+  <textarea id="msg" placeholder="Votre message…"></textarea>
+  <button class="big" id="sayBtn" style="background:#8a5a00">📣 Reachy le dira à voix haute</button>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-let viewing = false, timer = null;
+const status = (txt, cls) => {{ $('status').textContent = txt; $('status').className = cls || ''; }};
 
 async function api(path, opts) {{
   const r = await fetch(path, opts);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({{}}))).detail || r.status);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({{}}))).detail || 'erreur ' + r.status);
   return r;
 }}
 
+// ── voice message: tap to record, tap again to send ──
+let rec = null, chunks = [];
+$('recBtn').onclick = async () => {{
+  if (rec && rec.state === 'recording') {{ rec.stop(); return; }}
+  try {{
+    const stream = await navigator.mediaDevices.getUserMedia({{audio: true}});
+    const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', '']
+      .find(m => !m || MediaRecorder.isTypeSupported(m));
+    rec = new MediaRecorder(stream, mime ? {{mimeType: mime}} : undefined);
+    chunks = [];
+    rec.ondataavailable = e => chunks.push(e.data);
+    rec.onstop = async () => {{
+      stream.getTracks().forEach(t => t.stop());
+      $('recBtn').classList.remove('recording');
+      $('recBtn').innerHTML = '🎙️ Parler à Reachy<br><span style="font-size:1rem;font-weight:400">Appuyez, parlez, réappuyez pour envoyer</span>';
+      status('Envoi de votre voix…');
+      const blob = new Blob(chunks, {{type: rec.mimeType || 'audio/webm'}});
+      const ext = (rec.mimeType || '').includes('mp4') ? '.mp4' : '.webm';
+      const form = new FormData();
+      form.append('file', blob, 'message' + ext);
+      try {{
+        await api('api/voice', {{method: 'POST', body: form}});
+        status('✔ Votre voix passe chez lui !', 'good');
+      }} catch (e) {{ status('✖ Échec : ' + e.message, 'bad'); }}
+    }};
+    rec.start();
+    $('recBtn').classList.add('recording');
+    $('recBtn').innerHTML = '🔴 Je vous écoute…<br><span style="font-size:1rem;font-weight:400">Réappuyez quand vous avez fini</span>';
+    status('Parlez maintenant');
+  }} catch (e) {{ status('✖ Micro refusé — autorisez-le dans les réglages', 'bad'); }}
+}};
+
+// ── watch ──
+let viewing = false, timer = null;
 async function refreshSnap() {{
   try {{
     const r = await api('api/snapshot');
     const blob = await r.blob();
-    const img = $('snap');
-    if (img.src) URL.revokeObjectURL(img.src);
-    img.src = URL.createObjectURL(blob);
-    img.hidden = false;
-    $('viewStatus').textContent = 'En direct · ' + new Date().toLocaleTimeString('fr-FR');
-  }} catch (e) {{
-    $('viewStatus').innerHTML = '<span class="err">Image indisponible (' + e.message + ')</span>';
-  }}
+    if ($('snap').src) URL.revokeObjectURL($('snap').src);
+    $('snap').src = URL.createObjectURL(blob);
+    $('snap').style.display = 'block';
+  }} catch (e) {{ status('✖ Image indisponible', 'bad'); }}
 }}
-
-$('viewBtn').onclick = async () => {{
+$('viewBtn').onclick = () => {{
   viewing = !viewing;
-  $('viewBtn').textContent = viewing ? 'Arrêter' : 'Regarder';
+  $('viewBtn').textContent = viewing ? '⏹ Arrêter de regarder' : '👁 Voir la maison';
   if (viewing) {{
+    status('Reachy prévient que vous regardez');
     api('api/view/start', {{method: 'POST'}}).catch(() => {{}});
-    refreshSnap();
-    timer = setInterval(refreshSnap, 2500);
+    refreshSnap(); timer = setInterval(refreshSnap, 2500);
   }} else {{
-    clearInterval(timer);
-    $('snap').hidden = true;
-    $('viewStatus').textContent = '';
+    clearInterval(timer); $('snap').style.display = 'none'; status('');
   }}
 }};
 
+// ── written message ──
+$('writeBtn').onclick = () => {{
+  const z = $('writeZone');
+  z.style.display = z.style.display === 'block' ? 'none' : 'block';
+}};
 $('sayBtn').onclick = async () => {{
   const text = $('msg').value.trim();
   if (!text) return;
-  $('sayStatus').textContent = 'Envoi…';
+  status('Envoi…');
   try {{
     await api('api/say', {{method: 'POST', headers: {{'Content-Type': 'application/json'}},
                            body: JSON.stringify({{text}})}});
-    $('sayStatus').textContent = 'Reachy transmet votre message 🎉';
+    status('✔ Reachy le dit à voix haute !', 'good');
     $('msg').value = '';
-  }} catch (e) {{
-    $('sayStatus').innerHTML = '<span class="err">Échec : ' + e.message + '</span>';
-  }}
+  }} catch (e) {{ status('✖ Échec : ' + e.message, 'bad'); }}
 }};
-
 fetch('api/phrases').then(r => r.json()).then(list => {{
-  $('phrases').innerHTML = list.map(p =>
-    `<span class="chip">${{p}}</span>`).join('');
+  $('phrases').innerHTML = list.map(t => `<button class="chip">${{t}}</button>`).join('');
   for (const chip of document.querySelectorAll('.chip'))
     chip.onclick = () => {{ $('msg').value = chip.textContent; }};
 }}).catch(() => {{}});
