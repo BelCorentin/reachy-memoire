@@ -144,6 +144,14 @@ journal tools loading, realtime session + French greeting.
   `curl -X POST http://<robot>:8000/update/start` — note the update routes are
   **unprefixed** (`/update/...`, not `/api/update/...`). Motors come back
   disabled after the update (see above).
+- **After a daemon self-update, restart the daemon** (`POST /api/daemon/restart`).
+  The post-update state can be wedged: every command is accepted (goto returns a
+  uuid, `nb_error: 0`, no log errors) but nothing physically moves — encoders
+  frozen, `/api/move/running` always empty, `write_dt ~0.07ms` in
+  `control_loop_stats` (healthy is ~0.4ms). Restart + re-enable motors fixes it.
+- **"Command accepted" ≠ "robot moved".** The only ground truth is reading
+  encoders back (`/api/state/present_head_pose` before/after, or
+  `get_current_joint_positions()`). SDK calls returning cleanly proves nothing.
 - SDK 1.10.0rc5 vs daemon 1.9.0 version-mismatch warning is benign so far
   (motion, tracking commands, and `play_sound` all verified).
 
