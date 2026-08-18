@@ -35,9 +35,13 @@ class Face:
 class StubRobot:
     def __init__(self):
         self.face = Face(False)
+        self.body_yaw = 0.0
 
     def get_tracked_face(self, wait: bool = False):
         return self.face
+
+    def get_current_joint_positions(self):
+        return ([self.body_yaw, 0, 0, 0, 0, 0, 0], [0.0, 0.0])
 
 
 class StubState:
@@ -165,6 +169,20 @@ mgr4.idle = False
 s4._last_seen = time.monotonic() - 100.0
 s4._tick()
 ok(not s4._scanning, "busy manager -> no scan start")
+
+# anchor follows reality when other moves change body yaw (upstream move_head resets it to 0)
+s6 = make_seeker(r6 := StubRobot(), mgr6 := StubManager())
+mgr6._head_tracking = True
+s6.hold_yaw = 2.0  # stale anchor (e.g. left over from a finished scan)
+r6.face = Face(True)
+r6.body_yaw = 0.3
+s6._tick()
+ok(abs(s6.hold_yaw - 0.3) < 1e-9, "face present -> anchor syncs to actual body yaw")
+r6.face = Face(False)
+r6.body_yaw = -0.7
+s6._tick()
+ok(abs(s6.hold_yaw + 0.7) < 1e-9, "quiet loss -> anchor still follows actual body yaw")
+ok(not s6._scanning, "syncing does not start a scan")
 
 # listening mid-scan -> abort
 s5 = make_seeker(StubRobot(), mgr5 := StubManager())

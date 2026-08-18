@@ -150,6 +150,14 @@ class FaceSeeker(threading.Thread):
         self._scanning = False
         self._legs = []
 
+    def _present_body_yaw(self) -> float:
+        """Actual body yaw from the robot, falling back to the current anchor."""
+        try:
+            joints, _ = self.robot.get_current_joint_positions()
+            return float(joints[0])
+        except Exception:
+            return self.hold_yaw
+
     # -- main loop ---------------------------------------------------------
 
     def run(self) -> None:
@@ -181,7 +189,17 @@ class FaceSeeker(threading.Thread):
                 # just stop queueing further legs. The head tracker owns the face.
                 self._abort_scan()
                 logger.info("FaceSeeker: face found, scan stopped (body at %.0f deg)", math.degrees(self.hold_yaw))
+            else:
+                # Other moves (e.g. the upstream move_head tool, which resets
+                # body_yaw to 0) may have moved the body; anchor where it
+                # actually is so breathing doesn't snap it back to a stale yaw.
+                self.hold_yaw = self._present_body_yaw()
             return
+
+        if not self._scanning:
+            # No face and no scan running: keep the anchor glued to reality so
+            # breathing never snaps the body to a stale yaw.
+            self.hold_yaw = self._present_body_yaw()
 
         if not (self.seek_enabled and self._tracking_on()):
             return
@@ -207,6 +225,7 @@ class FaceSeeker(threading.Thread):
         if not self.manager.is_idle():
             return
 
+        self.hold_yaw = self._present_body_yaw()
         self._legs = scan_targets(self.hold_yaw)
         self._scanning = True
         logger.info("FaceSeeker: nobody in frame for %.0fs, scanning", now - self._last_seen)
