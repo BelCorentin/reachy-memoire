@@ -33,6 +33,26 @@ sys.path.insert(0, str(REPO_ROOT))
 
 logger = logging.getLogger("memoire.launcher")
 
+# ── patch 0: robot host override ────────────────────────────────────────────
+# The app never passes host= to ReachyMini(), so the SDK falls back to its
+# hardcoded "reachy-mini.local" default — which breaks whenever the laptop's
+# mDNS cache is cold (typically right after a robot/daemon restart). run.sh
+# resolves the robot (mDNS, then last-known IP) and exports REACHY_HOST.
+
+from reachy_mini import reachy_mini as _rm  # noqa: E402
+
+_real_rm_init = _rm.ReachyMini.__init__
+
+
+def _rm_init(self, *args, **kwargs):
+    override = os.getenv("REACHY_HOST")
+    if override and "host" not in kwargs:
+        kwargs["host"] = override
+    _real_rm_init(self, *args, **kwargs)
+
+
+_rm.ReachyMini.__init__ = _rm_init
+
 # ── patch 1: signalling host override ───────────────────────────────────────
 
 from reachy_mini.media import media_manager as _mm  # noqa: E402

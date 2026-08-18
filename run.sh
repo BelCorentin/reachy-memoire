@@ -41,6 +41,10 @@ if [[ -z "$ROBOT_HOST" ]]; then
 fi
 echo "$ROBOT_HOST" > "$ROOT/.last_robot_ip"
 
+# The SDK inside the app defaults to "reachy-mini.local"; hand it the resolved
+# address so cold mDNS can't break the connection (launch_patched reads this).
+export REACHY_HOST="$ROBOT_HOST"
+
 # Daemon 1.8.3 reports its hotspot IP as wlan_ip → SDK dials the WebRTC
 # signalling server on an unroutable address (Field Log #5). Force the real one.
 export REACHY_SIGNALLING_HOST="${REACHY_SIGNALLING_HOST:-$ROBOT_HOST}"
