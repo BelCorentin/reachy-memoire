@@ -20,12 +20,26 @@ fi
 
 # HF_TOKEN: export it yourself or rely on `hf auth login` cache.
 
-ROBOT_HOST="${REACHY_HOST:-$(getent hosts reachy-mini.local | awk '{print $1; exit}')}"
+# Resolve the robot. mDNS goes cold after robot/daemon restarts, and under
+# `set -e` a failed $(getent) in an assignment would kill the script silently —
+# so every lookup is || true and we fall back to the last known-good IP.
+ROBOT_HOST="${REACHY_HOST:-}"
+if [[ -z "$ROBOT_HOST" ]]; then
+  ROBOT_HOST="$(getent hosts reachy-mini.local 2>/dev/null | awk '{print $1; exit}' || true)"
+fi
+if [[ -z "$ROBOT_HOST" && -f "$ROOT/.last_robot_ip" ]]; then
+  CAND="$(cat "$ROOT/.last_robot_ip")"
+  if curl -s -m3 "http://$CAND:8000/api/daemon/status" >/dev/null 2>&1; then
+    ROBOT_HOST="$CAND"
+    echo "mDNS cold — using last known robot IP $ROBOT_HOST"
+  fi
+fi
 if [[ -z "$ROBOT_HOST" ]]; then
   echo "Cannot resolve reachy-mini.local — is the robot on and on the same wifi?" >&2
   echo "(Set REACHY_HOST=<ip> to skip mDNS.)" >&2
   exit 1
 fi
+echo "$ROBOT_HOST" > "$ROOT/.last_robot_ip"
 
 # Daemon 1.8.3 reports its hotspot IP as wlan_ip → SDK dials the WebRTC
 # signalling server on an unroutable address (Field Log #5). Force the real one.

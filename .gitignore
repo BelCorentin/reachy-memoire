@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 .env
 backups/
+.last_robot_ip
