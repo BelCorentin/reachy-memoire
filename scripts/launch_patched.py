@@ -12,6 +12,14 @@ Patches applied before the app starts:
    presence API) on ``MEMOIRE_HUB_PORT`` (default 7870) once the app is up.
    The hub is a separate port on purpose: it is the only thing a tunnel
    should ever expose — the upstream UI on :7860 has no auth.
+
+3. Face seeking (needs daemon >= 1.9.0). Auto-enables the daemon face tracker
+   and starts ``hub.seeker.FaceSeeker``: when nobody is in frame for a while,
+   the body sweeps in widening yaw legs until a face is found, then anchors
+   there. Upstream ``BreathingMove`` hard-codes ``body_yaw=0.0`` which would
+   snap the body back to center between moves, so its ``evaluate`` is patched
+   to hold the seeker's anchor yaw instead.
+   Disable with ``MEMOIRE_SEEK=0`` (scan) / ``MEMOIRE_HEAD_TRACKING=0`` (tracking).
 """
 
 import os
@@ -76,6 +84,7 @@ def _ls_init(self, *args, **kwargs):
     _orig_ls_init(self, *args, **kwargs)
     _state.attach(self)
     _start_hub_once()
+    _start_seeker_once(self)
 
 
 def _dispatch_transcript(self, role, text, final):
@@ -90,6 +99,47 @@ def _dispatch_transcript(self, role, text, final):
 
 _LS.__init__ = _ls_init
 _LS._dispatch_transcript = _dispatch_transcript
+
+# ── patch 3: face seeking (tracking + body scan) ────────────────────────────
+
+from hub.seeker import FaceSeeker  # noqa: E402
+from reachy_mini_conversation_app import moves as _moves  # noqa: E402
+
+_seeker: FaceSeeker | None = None
+_seeker_started = threading.Event()
+
+_orig_breathing_evaluate = _moves.BreathingMove.evaluate
+
+
+def _breathing_evaluate(self, t):
+    # Hold the seeker's anchor yaw instead of snapping the body back to 0.
+    head, antennas, _ = _orig_breathing_evaluate(self, t)
+    yaw = _seeker.hold_yaw if _seeker is not None else 0.0
+    return (head, antennas, yaw)
+
+
+_moves.BreathingMove.evaluate = _breathing_evaluate
+
+
+def _start_seeker_once(stream) -> None:
+    global _seeker
+    if _seeker_started.is_set():
+        return
+    _seeker_started.set()
+    deps = getattr(getattr(stream, "handler", None), "deps", None)
+    robot = getattr(deps, "reachy_mini", None)
+    manager = getattr(deps, "movement_manager", None)
+    if robot is None or manager is None:
+        logger.warning("face seeker not started: robot/movement_manager unavailable")
+        return
+    _seeker = FaceSeeker(
+        robot,
+        manager,
+        auto_tracking=os.getenv("MEMOIRE_HEAD_TRACKING", "1") != "0",
+        seek_enabled=os.getenv("MEMOIRE_SEEK", "1") != "0",
+    )
+    _seeker.start()
+    print("Face seeker on (tracking + body scan; MEMOIRE_SEEK=0 to disable)")
 
 # ── run upstream ────────────────────────────────────────────────────────────
 

@@ -119,3 +119,31 @@ assistant audio queue first.
 - 2026-08-15: repo created; phase-1 scaffold (profile + sqlite journal tools +
   launcher). Upstream cloned to `~/git/reachy_mini_conversation_app` for
   reference.
+
+## Face seeking (2026-08-18 night)
+
+Ask: robot should turn around to look for humans, then look at them.
+
+- Daemon-side face tracker (YuNet, `reachy_mini/vision/face_tracking.py`)
+  landed in **daemon 1.9.0** and only steers the **head** (±~65° from body).
+  Robot was on 1.8.3 where `SetHeadTrackingCmd` is silently ignored → updated
+  to 1.9.0 via `POST /update/start` (routes unprefixed).
+- `hub/seeker.py`: `FaceSeeker` thread polls `get_tracked_face()`; after 8 s
+  with no face it queues `ScanMove` legs (cosine-eased body-yaw sweeps,
+  ±60°→±120°→±150°, 35°/s, 1.2 s detector pause per leg, head leads 18° into
+  the turn) on the upstream `MovementManager` queue — composing with
+  breathing/emotions instead of fighting the 60 Hz loop. Face found → stop
+  legs, anchor body there (tracker owns the head). Empty full sweep →
+  recenter + 90 s cooldown.
+- Upstream `BreathingMove.evaluate` hardcodes `body_yaw=0.0` (body would snap
+  to center between moves) → `launch_patched.py` patches it to return
+  `seeker.hold_yaw`.
+- Startup: tracking auto-enabled (`MEMOIRE_HEAD_TRACKING=0` to disable);
+  sweep disabled with `MEMOIRE_SEEK=0`.
+- Root cause of "head not moving at all": daemon boots with
+  `motor_control_mode: disabled` — no error surfaces anywhere. run.sh now
+  preflights `POST /api/motors/set_mode/enabled`.
+- Validated: 22-check stubbed suite (trajectory, sweep pattern, state machine)
+  + live 45 s run on the robot (full sweep sequence + hold + clean recenter).
+  NOT yet verified live: an actual `detected=True` lock-on (nobody was in
+  frame during the test window).

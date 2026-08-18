@@ -34,6 +34,9 @@ export REACHY_SIGNALLING_HOST="${REACHY_SIGNALLING_HOST:-$ROBOT_HOST}"
 # Preflight: make sure the daemon's media stack (WebRTC signalling :8443) is up.
 curl -s -m5 -X POST "http://$ROBOT_HOST:8000/api/media/acquire" >/dev/null || true
 
+# Preflight: the daemon boots with motors DISABLED (head silently doesn't move).
+curl -s -m5 -X POST "http://$ROBOT_HOST:8000/api/motors/set_mode/enabled" >/dev/null || true
+
 PY="python3"
 if [[ -x "$ROOT/.venv/bin/python" ]]; then
   PY="$ROOT/.venv/bin/python"

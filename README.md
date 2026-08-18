@@ -20,6 +20,13 @@ journal tools plugged in via the app's external profile/tool mechanism.
   "who visited?", filtered by day/keyword.
 - **Camera + head tracking**: describe the real scene on request, look at the
   person while talking.
+- **Face seeking** (`hub/seeker.py`, needs robot daemon ≥ 1.9.0): face tracking
+  is auto-enabled at startup, and when nobody has been in frame for ~8 s the
+  body slowly sweeps in widening yaw legs (±60° → ±120° → ±150°) until the
+  tracker finds a face, then anchors there — so the robot turns around to look
+  for people instead of staring at a wall. After a full empty sweep it recenters
+  and cools down for 90 s. Disable the sweep with `MEMOIRE_SEEK=0`, or startup
+  tracking entirely with `MEMOIRE_HEAD_TRACKING=0`.
 - **Orientation**: time/date tool for "what day is it?".
 
 Inference is Hugging Face's cloud realtime backend (speech↔speech). Phase 2 =
@@ -128,9 +135,17 @@ journal tools loading, realtime session + French greeting.
 - If WebRTC still times out, check the signalling server:
   `curl -X POST http://<robot>:8000/api/media/acquire` then verify port 8443
   is open.
-- SDK 1.10.0rc5 vs daemon 1.8.3 version-mismatch warning is benign so far;
-  the daemon offers a 1.9.0 self-update (`GET /update/available`) if it ever
-  isn't.
+- **Robot daemon boots with motors disabled** (`motor_control_mode: disabled`,
+  no error anywhere) — the head just doesn't move. Enable with
+  `curl -X POST http://<robot>:8000/api/motors/set_mode/enabled`.
+- **Face tracking needs daemon ≥ 1.9.0.** On 1.8.3 the `SetHeadTrackingCmd`
+  is silently ignored (`get_tracked_face()` returns `detected=False, ts=None`
+  forever, no version error). Robot updated to 1.9.0 on 2026-08-18 via
+  `curl -X POST http://<robot>:8000/update/start` — note the update routes are
+  **unprefixed** (`/update/...`, not `/api/update/...`). Motors come back
+  disabled after the update (see above).
+- SDK 1.10.0rc5 vs daemon 1.9.0 version-mismatch warning is benign so far
+  (motion, tracking commands, and `play_sound` all verified).
 
 ## Where things are logged / stored
 
