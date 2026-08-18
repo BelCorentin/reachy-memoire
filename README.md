@@ -26,6 +26,48 @@ Inference is Hugging Face's cloud realtime backend (speech↔speech). Phase 2 =
 local inference POC via `HF_REALTIME_CONNECTION_MODE=local` +
 `HF_REALTIME_WS_URL` pointing at a self-hosted realtime endpoint.
 
+## The hub (family remote + caregiver dashboard)
+
+A second web server runs **inside the same process** on port **7870** (started
+by `run.sh` automatically). It is deliberately separate from the upstream UI
+on :7860: the hub is token-authenticated and is the only thing you may ever
+expose to the internet.
+
+- **`/famille`** — phone page for a remote relative: watch through Reachy's
+  camera (snapshot every 2.5 s; Reachy politely announces who is watching) and
+  make Reachy speak a message aloud (free text or tap a canned phrase from
+  `data/phrases.json`). Add-to-homescreen on iPhone/Android → feels like an app.
+- **`/care`** — caregiver dashboard: conversation volume per day, mood entries,
+  the day's care journal, and **repeated questions/phrases over 30 days with a
+  week-over-week trend** — the honest "what is he forgetting" signal (fuzzy
+  clustering of his own words, no model opinions).
+- **Transcript logging** — every final user/assistant turn is stored in
+  `data/memoire.db` (`transcript` table). This is the analytics substrate;
+  it starts accumulating from the first run.
+
+### Access control
+
+```bash
+.venv/bin/python scripts/make_tokens.py mamie celine   # prints share URLs
+```
+
+Tokens live in `data/hub_tokens.json` (gitignored). Opening
+`/famille?t=<token>` once stores it as a cookie on the phone. Per-person rate
+limits on say/snapshot; `/api/say` capped at 400 chars. Note: `say` is an
+*injected turn* — the model voices the message (faithfully quoted in the
+prompt), it is not guaranteed-verbatim TTS.
+
+### Remote access (family outside the LAN)
+
+```bash
+./scripts/expose.sh                 # Tailscale Funnel of :7870 (preferred)
+./scripts/expose.sh --cloudflared   # ephemeral fallback URL
+```
+
+Then regenerate share links with `--base-url <public url>`. **Never tunnel
+:7860** — the upstream UI has no auth. (Funnel path not yet live-tested;
+tailscale isn't installed on this laptop.)
+
 ## Setup
 
 1. Install the upstream app (SDK first, per its README):
@@ -87,6 +129,8 @@ journal tools loading, realtime session + French greeting.
 |---|---|
 | App run logs (full console output) | `logs/run-<timestamp>.log` (+ `logs/latest.log` symlink), gitignored |
 | Care journal (visits, meals, meds, mood) | `data/memoire.db` (SQLite), gitignored |
+| Conversation transcripts (final turns) | `data/memoire.db`, `transcript` table |
+| Hub access tokens / canned phrases | `data/hub_tokens.json` / `data/phrases.json`, gitignored |
 | Long-term facts (`remember` tool) | `~/.local/share/reachy_mini_conversation_app/memory.v1.json` |
 | Robot-side daemon logs | on the robot: `journalctl -u reachy-mini-daemon` (ssh `pollen@reachy-mini.local`) |
 

@@ -31,6 +31,52 @@ Constraints from upstream loader (`core_tools.py`):
 - [ ] Verify journal entries actually get written during a natural conversation
       (the model must call `journal_event` unprompted)
 
+## Hub — caregiver dashboard + family remote (2026-08-18)
+
+In-process FastAPI on **:7870** (own port on purpose: it is the ONLY thing a
+tunnel may expose — the upstream UI on :7860 has no auth). Wired by
+`scripts/launch_patched.py` wrapping `LocalStream`:
+
+- `__init__` wrap → captures the live stream (handler + robot refs) and starts
+  the hub uvicorn thread once.
+- `_dispatch_transcript` wrap → logs every `final=True` turn into
+  `transcript` table in `memoire.db` (WAL mode; shared with journal tools).
+
+Key upstream facts this relies on:
+- `handler.say(text)` = **injected turn**, model voices it — not verbatim TTS
+  (`conversation_handler.py`). Good enough for "mamie fait parler Reachy";
+  verbatim fallback would be edge-tts WAV into the audio queue.
+- `LocalStream.clear_audio_queue()` = barge-in, mirrored from upstream's
+  `conversation.say` RPC.
+- Cross-loop: hub server has its own event loop; `HubState.say` uses
+  `run_coroutine_threadsafe` onto `stream._asyncio_loop` when set.
+
+Routes (all token-auth except `/health`): `/famille` (grandma PWA: snapshot
+polling 2.5s + say + canned phrases), `/care` (dashboard: turns/day, mood,
+journal timeline, repeated-utterance clusters), `/api/say|snapshot|status|
+phrases|view/start|care/summary`. Auth: `data/hub_tokens.json` via
+`scripts/make_tokens.py` (Bearer / `?t=` / cookie); per-person rate limits
+(say 1/5s, snapshot 1/s); say capped 400 chars; view-start announces "X
+regarde" max 1/min.
+
+Repetition detector = the "what is he forgetting" signal: normalize (lower,
+strip accents/punct), greedy fuzzy clustering (difflib ratio ≥ .8), report
+clusters ≥3× over 30 d with this-week vs prev-week trend. Stdlib only.
+
+Remote access: `scripts/expose.sh` → Tailscale Funnel of :7870 (preferred,
+stable URL) or `--cloudflared` quick tunnel. **Neither installed locally yet —
+tunnel path untested.** Never funnel :7860.
+
+- [x] M1 transcript logging (tested: unit)
+- [x] M2 hub routes + dashboard v1 + famille page (tested: 26-check suite,
+      stubbed robot/handler — `tests/test_hub.py`)
+- [x] M3 auth/tokens/expose script (funnel itself untested, no tailscale here)
+- [x] M4 repetition detector + canned phrases (`data/phrases.json`, seeded)
+- [ ] Live test with robot: transcript rows appear during real conversation,
+      snapshot from phone, say from phone, view announcement
+- [ ] Install tailscale + funnel end-to-end from a phone on 4G
+- [ ] Later: live WebRTC video instead of snapshot polling
+
 ## Phase 2 — local inference POC
 
 - Point `HF_REALTIME_CONNECTION_MODE=local` + `HF_REALTIME_WS_URL` at a

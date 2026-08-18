@@ -11,6 +11,12 @@ export REACHY_MINI_CUSTOM_PROFILE="memoire"
 export AUTOLOAD_EXTERNAL_TOOLS=1
 export REALTIME_TRANSCRIPTION_LANGUAGE="fr"
 export MEMOIRE_DB_PATH="${MEMOIRE_DB_PATH:-$ROOT/data/memoire.db}"
+export MEMOIRE_HUB_PORT="${MEMOIRE_HUB_PORT:-7870}"
+
+if [[ ! -f "$ROOT/data/hub_tokens.json" ]]; then
+  echo "note: no hub tokens yet — famille/care pages need one:" >&2
+  echo "      $ROOT/.venv/bin/python scripts/make_tokens.py mamie" >&2
+fi
 
 # HF_TOKEN: export it yourself or rely on `hf auth login` cache.
 
@@ -36,6 +42,6 @@ fi
 mkdir -p "$ROOT/logs"
 LOG="$ROOT/logs/run-$(date +%F-%H%M%S).log"
 ln -sf "$(basename "$LOG")" "$ROOT/logs/latest.log"
-echo "Robot: $ROBOT_HOST · Log: $LOG"
+echo "Robot: $ROBOT_HOST · Log: $LOG · Hub: http://localhost:$MEMOIRE_HUB_PORT"
 
 "$PY" "$ROOT/scripts/launch_patched.py" "$@" 2>&1 | tee "$LOG"
