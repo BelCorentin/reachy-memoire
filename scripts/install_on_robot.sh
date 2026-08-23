@@ -35,11 +35,22 @@ UNIT="reachy-memoire.service"
 say() { printf '\n== %s\n' "$*"; }
 
 # sudo without a tty: prefer NOPASSWD, else ROBOT_SUDO_PASS, else interactive.
+# Deliberately NOT `printf pass | sudo -S`: `sudo -S` reads the password off
+# stdin, which silently steals the pipe from the command being run — that is
+# how `printf HF_TOKEN=... | sudo_run tee /etc/...env` wrote a 0-byte file and
+# still printed success. SUDO_ASKPASS leaves stdin alone.
+_ASKPASS=""
 sudo_run() {
   if sudo -n true 2>/dev/null; then
     sudo "$@"
   elif [[ -n "${ROBOT_SUDO_PASS:-}" ]]; then
-    printf '%s\n' "$ROBOT_SUDO_PASS" | sudo -S -p '' "$@"
+    if [[ -z "$_ASKPASS" ]]; then
+      _ASKPASS="$(mktemp)"
+      printf '#!/bin/sh\nprintf %%s\\\\n "$ROBOT_SUDO_PASS"\n' > "$_ASKPASS"
+      chmod 700 "$_ASKPASS"
+      trap 'rm -f "$_ASKPASS"' EXIT
+    fi
+    ROBOT_SUDO_PASS="$ROBOT_SUDO_PASS" SUDO_ASKPASS="$_ASKPASS" sudo -A "$@"
   else
     echo "!! sudo needs a password: re-run with ROBOT_SUDO_PASS=... or ssh -t" >&2
     sudo "$@"
@@ -116,6 +127,11 @@ else
 fi
 sudo_run chmod 600 "$ENV_FILE"
 sudo_run chown root:root "$ENV_FILE"
+# Assert, don't assume: the file is root:0600 so this is the only way to see it.
+if ! sudo_run grep -q '^HF_TOKEN=.' "$ENV_FILE"; then
+  echo "!! $ENV_FILE has no HF_TOKEN line — the write went nowhere" >&2; exit 1
+fi
+echo "$ENV_FILE: $(sudo_run stat -c '%U:%G %a %s bytes' "$ENV_FILE")"
 
 # ── 5. systemd unit ─────────────────────────────────────────────────────────
 say "systemd unit"
