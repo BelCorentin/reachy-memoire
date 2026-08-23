@@ -102,7 +102,95 @@ tailscale isn't installed on this laptop.)
    ./run.sh --no-camera   # audio-only
    ```
 
-## Operations (day-to-day, no desktop app needed)
+## Robot-side install (standalone: power on → memoire runs)
+
+This is the deployment mode that matters outside the lab — a phone hotspot and
+a power cable, no laptop anywhere. The app runs **on the Raspberry Pi inside
+the robot**, as a systemd service, alongside (never replacing)
+`reachy-mini-daemon.service`.
+
+```bash
+# one command, from the laptop, idempotent — re-run it to update the robot
+ssh pollen@reachy-mini.local \
+  "HF_TOKEN=$(cat ~/.cache/huggingface/token) ROBOT_SUDO_PASS=root bash -s" \
+  < scripts/install_on_robot.sh
+
+# runtime state that is NOT in git (hub tokens, canned phrases, the journal)
+rsync -av data/hub_tokens.json data/phrases.json data/memoire.db \
+      pollen@reachy-mini.local:/home/pollen/reachy-memoire/data/
+```
+
+After a wipe there is no local clone to pipe from, so pull the script straight
+from GitHub instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BelCorentin/reachy-memoire/master/scripts/install_on_robot.sh \
+  | ssh pollen@reachy-mini.local "HF_TOKEN=hf_... ROBOT_SUDO_PASS=root bash -s"
+```
+
+What it does: `apt install ffmpeg` · clone to `/home/pollen/reachy-memoire` ·
+`uv venv --python 3.12` + install the upstream app and `edge-tts` ·
+write `/etc/reachy-memoire.env` · install and enable
+`reachy-memoire.service` · wait for `:7870/health`.
+
+**Secrets never go in git.** `HF_TOKEN` lives in `/etc/reachy-memoire.env`
+(root-owned, 0600), referenced by the unit's `EnvironmentFile`. Without a
+token the service still starts and the hub answers, but the realtime session
+cannot open. Rotate it with:
+
+```bash
+ssh pollen@reachy-mini.local "echo 'HF_TOKEN=hf_...' | sudo tee /etc/reachy-memoire.env" \
+  && ssh pollen@reachy-mini.local "sudo systemctl restart reachy-memoire"
+```
+
+### The unit
+
+`scripts/reachy-memoire.service` runs `run.sh` as `pollen` with
+`REACHY_HOST=REACHY_SIGNALLING_HOST=127.0.0.1`. On the robot the daemon is on
+loopback, which sidesteps the `wlan_ip` signalling bug entirely and works even
+before wifi associates.
+
+`After=reachy-mini-daemon.service` only orders unit *start* — the daemon's REST
+API answers tens of seconds later, and it always boots with motors disabled.
+So `ExecStartPre=scripts/wait_for_daemon.sh` polls `/api/daemon/status` until
+`state: running` (180 s budget), then does the media-acquire and motors-enable
+preflights. `Restart=on-failure`, `RestartSec=10`.
+
+Note the app's own inactivity timeout is 24 h
+(`REACHY_MINI_APP_TIMEOUT_MINUTES`); when it fires, the app exits *cleanly*, so
+`on-failure` deliberately does not restart it — same for the voice
+"endors-toi" tool. `sudo systemctl restart reachy-memoire` wakes it back up.
+
+### Day-to-day on the robot
+
+```bash
+sudo systemctl status  reachy-memoire     # is it up
+journalctl -u reachy-memoire -f           # live logs (also logs/latest.log)
+sudo systemctl restart reachy-memoire     # after changing the env file
+curl -s http://reachy-mini.local:7870/health   # from any LAN machine
+```
+
+Family/care links are the same as before, on the robot's own address:
+`http://reachy-mini.local:7870/famille?t=<token>`. Regenerate them with
+`scripts/make_tokens.py --base-url http://reachy-mini.local:7870`.
+Only :7870 may ever be exposed beyond the LAN — :7860 has no auth, and the
+service does not start the Gradio UI at all.
+
+### Demo-day checklist (robot only, phone hotspot)
+
+1. Turn the hotspot on **first**, then power the robot — it auto-joins any
+   network already in `curl http://reachy-mini.local:8000/wifi/status`
+   (`known_networks`). A new hotspot has to be added once from the robot's
+   own AP (10.42.0.1) or the dashboard on :8000.
+2. Wait ~70 s. Measured on a cold boot: daemon REST ready at +18 s, service
+   active at +34 s, realtime session open and greeting spoken at +68 s.
+3. From a phone on the same hotspot: `http://reachy-mini.local:7870/health`
+   should return `{"ok":true,"session":true}`. `session:false` means the
+   HF realtime connection did not open — check `HF_TOKEN` and internet.
+4. The robot needs internet the whole time: inference is HF cloud, and the
+   hub's TTS calls Microsoft edge-tts. No internet = no speech at all.
+
+## Operations (laptop-driven, no desktop app needed)
 
 The Pollen desktop app is **only** a convenience for wifi provisioning and app
 management — nothing here depends on it. Everything talks straight to the

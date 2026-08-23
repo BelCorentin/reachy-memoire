@@ -120,6 +120,32 @@ assistant audio queue first.
   launcher). Upstream cloned to `~/git/reachy_mini_conversation_app` for
   reference.
 
+## Robot-side autonomy (2026-08-23)
+
+Ask: hospital demo on a phone hotspot — power on, memoire runs, no laptop.
+
+- Everything installs into `/home/pollen/reachy-memoire` with its **own** uv
+  venv (python 3.12, matching the robot's `/venvs/*`). Pollen's
+  `/venvs/apps_venv` is deliberately left alone — it holds an older
+  conversation-app (0.10.0) and reachy_mini 1.9.0, and it is theirs.
+- The Pi image already ships `uv` at `/opt/uv/uv` and the gir/cairo `-dev`
+  packages, so `PyGObject`/`pycairo` build from source without extra apt work.
+  Only `ffmpeg` had to be installed. Full install ≈ 15 min, dominated by
+  downloading scipy + reachy_mini over the LAN.
+- On the robot the SDK talks to `127.0.0.1:8000`, which makes the `wlan_ip`
+  signalling workaround moot — `run.sh` already honours `REACHY_HOST`, so no
+  code change was needed, only unit `Environment=` lines.
+- `After=reachy-mini-daemon.service` is not enough: at boot the daemon's REST
+  API answers ~18 s after the unit starts. `scripts/wait_for_daemon.sh` polls
+  `/api/daemon/status` for `state: running`, then does media-acquire +
+  motors-enable. Without it the first start would burn a restart cycle.
+- Verified 2026-08-23 after a real `reboot`, laptop entirely out of the loop:
+  service auto-started, hub answered on :7870 from the laptop, realtime session
+  opened, French greeting emitted, camera snapshot returned a real frame,
+  encoders moved (breathing + seeker), `/api/say` mode=tts synthesized and
+  handed two WAVs to the daemon audio sink. Acoustic output at the speaker is
+  the one thing still needing ears.
+
 ## Face seeking (2026-08-18 night)
 
 Ask: robot should turn around to look for humans, then look at them.
