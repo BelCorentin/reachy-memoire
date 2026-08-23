@@ -1,0 +1,38 @@
+[Unit]
+Description=Reachy Memoire — memory companion (conversation app + family hub)
+Documentation=https://github.com/BelCorentin/reachy-memoire
+# The daemon is a *client* dependency, not an owner: we never stop or replace
+# reachy-mini-daemon.service, we wait for it (see ExecStartPre).
+After=network-online.target reachy-mini-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pollen
+Group=pollen
+WorkingDirectory=/home/pollen/reachy-memoire
+
+# Secrets (HF_TOKEN, optional MEMOIRE_TTS_VOICE...). Root-owned 0600, never in
+# git. `-` = tolerate absence so the unit still starts and logs a clean error.
+EnvironmentFile=-/etc/reachy-memoire.env
+
+Environment=HOME=/home/pollen
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# On the robot itself the daemon is on loopback — no mDNS, no wlan_ip bug
+# (Field Log #5), works even before/without wifi.
+Environment=REACHY_HOST=127.0.0.1
+Environment=REACHY_SIGNALLING_HOST=127.0.0.1
+Environment=MEMOIRE_HUB_PORT=7870
+# Same malloc cap the daemon uses on the 4 GB Pi.
+Environment=MALLOC_ARENA_MAX=2
+
+ExecStartPre=/home/pollen/reachy-memoire/scripts/wait_for_daemon.sh
+ExecStart=/home/pollen/reachy-memoire/run.sh
+
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
