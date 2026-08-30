@@ -33,6 +33,73 @@ Inference is Hugging Face's cloud realtime backend (speech↔speech). Phase 2 =
 local inference POC via `HF_REALTIME_CONNECTION_MODE=local` +
 `HF_REALTIME_WS_URL` pointing at a self-hosted realtime endpoint.
 
+## Profiles
+
+Two, selected with `REACHY_MINI_CUSTOM_PROFILE` (default `memoire`):
+
+| profile | for | shape |
+|---|---|---|
+| `memoire` | one person with memory troubles | care-first: never quizzes, gently reorients, silently logs a care journal |
+| `grandsparents` | a couple, living independently | task-first: captures what they have to do, asks the ONE question that makes a note usable, reads the list back |
+
+`grandsparents` adds `add_task` / `list_tasks` / `complete_task` (a `tasks`
+table in the same `data/memoire.db`) and drops `journal_event` from its tool
+list — it is a companion, not a monitor. Its brief is deliberate about the
+clarifying question: exactly one at a time, never twice for the same fact, and
+if the answer doesn't come the task is saved vague rather than pursued. An
+interrogation is worse than an imperfect note.
+
+Switch it on the robot by editing `/etc/reachy-memoire.env`:
+
+```bash
+REACHY_MINI_CUSTOM_PROFILE=grandsparents
+```
+
+then `sudo systemctl restart reachy-memoire`. Locally, just export it before
+`./run.sh`.
+
+## Turn detection (barge-in)
+
+Upstream builds `ServerVad(type="server_vad", interrupt_response=True)` and
+sets nothing else, so the server defaults apply — `threshold 0.5`,
+`silence_duration_ms 500`. With **two people talking to each other** that is far
+too eager: observed 2026-08-30, the reply was cancelled every 1–2 s and the user
+transcript grew into one runaway sentence. `launch_patched.py` patch 4
+overrides it; all four knobs are env vars, so they can be retuned in the room
+and the service restarted, with no redeploy:
+
+| env | default here | upstream/server default |
+|---|---|---|
+| `MEMOIRE_VAD_THRESHOLD` | `0.7` | 0.5 |
+| `MEMOIRE_VAD_SILENCE_MS` | `1200` | 500 |
+| `MEMOIRE_VAD_PREFIX_MS` | `300` | 300 |
+| `MEMOIRE_VAD_INTERRUPT` | `0` (off) | on |
+
+Startup logs the applied values: `VAD: threshold=0.7 silence=1200ms interrupt=False`.
+Still barging in → raise the threshold. Feels sluggish / lets you ramble →
+lower `MEMOIRE_VAD_SILENCE_MS`.
+
+## Wifi: getting the robot onto a new network, headless
+
+The robot falls back to its own AP (`reachy-mini-ap`, password `reachy-mini`,
+`10.42.0.1`) whenever no known network is in range — **silently**: from the
+laptop it looks exactly like a robot that is off. A wifi scan showing
+`reachy-mini-ap` is the tell.
+
+The documented way back is the dashboard in a browser. The headless way is
+`POST /wifi/connect` on the daemon, wrapped here:
+
+```bash
+HOTSPOT_PSK='...' ./scripts/provision_hotspot.sh 'My Network'
+```
+
+It joins the AP, pushes the credentials, rejoins your network, then sweeps for
+the robot and prints `/wifi/status` + `:7870/health`. The machine running it is
+**offline for the middle of the round trip**, which is why it logs to
+`logs/provision-*.log` rather than expecting anyone to watch it. Arg 1 must be
+both the SSID to teach the robot and the name of the saved NetworkManager
+profile to return to.
+
 ## The hub (family remote + caregiver dashboard)
 
 A second web server runs **inside the same process** on port **7870** (started
