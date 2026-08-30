@@ -20,6 +20,15 @@ Patches applied before the app starts:
    snap the body back to center between moves, so its ``evaluate`` is patched
    to hold the seeker's anchor yaw instead.
    Disable with ``MEMOIRE_SEEK=0`` (scan) / ``MEMOIRE_HEAD_TRACKING=0`` (tracking).
+
+4. Turn-detection tuning. Upstream builds ``ServerVad(type="server_vad",
+   interrupt_response=True)`` and sets none of the other knobs, so the server
+   defaults apply: threshold 0.5, silence_duration_ms 500. In a room with two
+   people talking *to each other* that is far too eager — observed 2026-08-30,
+   the robot cut its own reply every 1-2 s and the user transcript grew into
+   one runaway sentence. We raise the activation threshold, wait longer for a
+   real end-of-turn, and stop cancelling an in-flight reply. All four are env
+   knobs so they can be retuned in the room without a redeploy.
 """
 
 import os
@@ -160,6 +169,55 @@ def _start_seeker_once(stream) -> None:
     )
     _seeker.start()
     print("Face seeker on (tracking + body scan; MEMOIRE_SEEK=0 to disable)")
+
+# ── patch 4: turn-detection (VAD) tuning ────────────────────────────────────
+# Two people chatting to each other is not the same acoustic problem as one
+# person addressing the robot. Defaults make it barge in constantly.
+
+from reachy_mini_conversation_app import huggingface_realtime as _hr  # noqa: E402
+
+_orig_session_config = _hr.HuggingFaceRealtimeHandler._get_session_config
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _get_session_config(self, tool_specs):
+    config = _orig_session_config(self, tool_specs)
+    vad = {
+        "type": "server_vad",
+        # Louder speech required to trigger -> ignores the other room / the TV.
+        "threshold": _env_float("MEMOIRE_VAD_THRESHOLD", 0.7),
+        # Wait for a real end of turn, not a breath between two sentences.
+        "silence_duration_ms": _env_int("MEMOIRE_VAD_SILENCE_MS", 1200),
+        "prefix_padding_ms": _env_int("MEMOIRE_VAD_PREFIX_MS", 300),
+        # Let Reachy finish its sentence instead of cancelling on any noise.
+        "interrupt_response": os.getenv("MEMOIRE_VAD_INTERRUPT", "0") != "0",
+    }
+    try:
+        config["audio"]["input"]["turn_detection"] = vad
+    except (KeyError, TypeError) as e:  # upstream restructured the config
+        logger.warning("VAD tuning skipped, session config shape changed: %s", e)
+        return config
+    logger.info(
+        "VAD: threshold=%s silence=%sms interrupt=%s",
+        vad["threshold"], vad["silence_duration_ms"], vad["interrupt_response"],
+    )
+    return config
+
+
+_hr.HuggingFaceRealtimeHandler._get_session_config = _get_session_config
 
 # ── run upstream ────────────────────────────────────────────────────────────
 

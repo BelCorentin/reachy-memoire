@@ -37,3 +37,31 @@ def connect() -> sqlite3.Connection:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_day ON journal(day)")
     return conn
+
+
+# ── tasks ───────────────────────────────────────────────────────────────────
+# The task list lives in the same SQLite file as the journal: one file to back
+# up, one file to rsync onto the robot. Statuses are deliberately only two —
+# an elderly-facing list that grows a workflow is a list nobody reads.
+
+TASK_STATUSES = ("open", "done")
+
+
+def connect_tasks() -> sqlite3.Connection:
+    """Connection with the tasks table ensured (same DB file as the journal)."""
+    conn = connect()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_ts TEXT NOT NULL,
+            created_day TEXT NOT NULL,
+            done_ts TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            person TEXT,
+            due TEXT,
+            text TEXT NOT NULL,
+            details TEXT
+        )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+    return conn
