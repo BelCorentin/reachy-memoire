@@ -1,330 +1,162 @@
-# reachy-memoire
+# Reachy Mémoire
 
-Memory-companion app for Reachy Mini, aimed at people with Alzheimer's / memory
-troubles. Built **on top of** Pollen's
+A gentle memory companion for people living with Alzheimer's or memory loss,
+running on [Reachy Mini](https://huggingface.co/docs/reachy_mini).
+
+Reachy chats with them in French. It remembers what they tell it, keeps track of
+what they need to do, and turns around to find them when they walk into the room.
+Family members far away can use a phone page to see through its eyes and send
+messages it reads out, or play their own recorded voice.
+
+I built it for my grandparents. My grandfather has memory troubles and my
+grandmother looks after him. In August 2026 the robot lived in their living
+room. What happened there is how the "couple" profile and the turn-detection
+settings below came about.
+
+> **Status: working prototype, not a medical device.** It was built and run on a
+> loaned Reachy Mini (July–September 2026). What was verified on the real robot
+> and what wasn't is listed [below](#status).
+
+## What it does
+
+- **A calm companion.** Short, warm sentences. It never quizzes memory
+  ("do you remember…?") and it gently helps with the day, date and place. It
+  gives no medical advice.
+- **Remembers for them.** Names of relatives, habits and preferences are kept
+  across sessions. Depending on the profile, it also keeps a small care journal
+  (visits, meals, mood…) or a list of tasks ("ask the bank for a cheque book").
+- **Finds people.** When nobody has been in view for a few seconds, the body
+  slowly turns to look around the room. When it sees a face, it stops and keeps
+  looking at the person.
+- **Connects the family** through a small web hub on the robot, protected by
+  per-person access tokens:
+  - **`/famille`**, for a relative's phone. Three big buttons: *see* (a camera
+    snapshot, and Reachy says out loud who is looking), *write* (Reachy reads
+    the message out word for word), *speak* (a recorded voice message played
+    on the robot).
+  - **`/care`**, for caregivers: conversations per day, mood, today's journal,
+    and the questions he repeats most often over 30 days with a week-on-week
+    trend. This is a factual answer to "what is he forgetting?", based only on
+    his own words, with no model interpretation.
+
+## Two profiles
+
+| profile | for | behaviour |
+|---|---|---|
+| `memoire` (default) | one person with memory troubles | care-first: reorients gently, quietly keeps a care journal |
+| `grandsparents` | a couple living at home | task-first: notes what they have to do, even when they're talking to each other, and asks **one** clarifying question at most. It keeps no journal: it's a companion, not a monitor |
+
+Pick one with `REACHY_MINI_CUSTOM_PROFILE=grandsparents` (see
+[configuration](docs/configuration.md)). Profiles are plain Markdown briefs in
+[`profiles/`](profiles/). Writing one for another language or another household
+means copying a folder.
+
+## How it works
+
+Mémoire is **not a fork**. It runs Pollen's
 [`reachy_mini_conversation_app`](https://github.com/pollen-robotics/reachy_mini_conversation_app)
-(installed as a dependency, not forked): a custom French care profile + SQLite
-journal tools plugged in via the app's external profile/tool mechanism.
+as a dependency and plugs into it:
 
-## What it does (phase 1 — cloud)
-
-- **French companion profile** (`profiles/memoire/`): calm, short sentences,
-  never quizzes, gently reorients, no medical advice. Locked via
-  `REACHY_MINI_CUSTOM_PROFILE`.
-- **Long-term facts**: upstream `remember`/`forget` tools (names of relatives,
-  habits, preferences) — injected into every session prompt.
-- **Care journal** (`tools/journal_event.py` + `tools/recall_journal.py`,
-  shared SQLite layer in `tools/_journal_db.py`): `journal_event` silently logs notable
-  moments (visits, meals, medication, mood, activities) into SQLite
-  (`data/memoire.db`); `recall_journal` answers "what did I do today?",
-  "who visited?", filtered by day/keyword.
-- **Camera + head tracking**: describe the real scene on request, look at the
-  person while talking.
-- **Face seeking** (`hub/seeker.py`, needs robot daemon ≥ 1.9.0): face tracking
-  is auto-enabled at startup, and when nobody has been in frame for ~8 s the
-  body slowly sweeps in widening yaw legs (±60° → ±120° → ±150°) until the
-  tracker finds a face, then anchors there — so the robot turns around to look
-  for people instead of staring at a wall. After a full empty sweep it recenters
-  and cools down for 90 s. Disable the sweep with `MEMOIRE_SEEK=0`, or startup
-  tracking entirely with `MEMOIRE_HEAD_TRACKING=0`.
-- **Orientation**: time/date tool for "what day is it?".
-
-Inference is Hugging Face's cloud realtime backend (speech↔speech). Phase 2 =
-local inference POC via `HF_REALTIME_CONNECTION_MODE=local` +
-`HF_REALTIME_WS_URL` pointing at a self-hosted realtime endpoint.
-
-## Profiles
-
-Two, selected with `REACHY_MINI_CUSTOM_PROFILE` (default `memoire`):
-
-| profile | for | shape |
-|---|---|---|
-| `memoire` | one person with memory troubles | care-first: never quizzes, gently reorients, silently logs a care journal |
-| `grandsparents` | a couple, living independently | task-first: captures what they have to do, asks the ONE question that makes a note usable, reads the list back |
-
-`grandsparents` adds `add_task` / `list_tasks` / `complete_task` (a `tasks`
-table in the same `data/memoire.db`) and drops `journal_event` from its tool
-list — it is a companion, not a monitor. Its brief is deliberate about the
-clarifying question: exactly one at a time, never twice for the same fact, and
-if the answer doesn't come the task is saved vague rather than pursued. An
-interrogation is worse than an imperfect note.
-
-Switch it on the robot by editing `/etc/reachy-memoire.env`:
-
-```bash
-REACHY_MINI_CUSTOM_PROFILE=grandsparents
+```
+reachy_mini_conversation_app  (speech ↔ speech, HF realtime backend, camera, moves)
+ ├── profiles/            ← our profiles (supported: external profiles dir)
+ ├── tools/               ← our tools: journal + tasks, SQLite (supported: external tools dir)
+ └── scripts/launch.py    ← three small hooks upstream has no option for yet:
+       1. hub      – web server on :7870 + transcript logging
+       2. seeker   – face tracking + body scan when nobody is in view
+       3. VAD      – turn detection tuned for a room where people talk to each other
+hub/                      ← the family page, care dashboard, speech, face seeker
 ```
 
-then `sudo systemctl restart reachy-memoire`. Locally, just export it before
-`./run.sh`.
+Each hook is small, isolated and can be switched off. Each one maps to an
+upstream change that would let us delete it: see [docs/upstream.md](docs/upstream.md).
 
-## Turn detection (barge-in)
+## Quick start
 
-Upstream builds `ServerVad(type="server_vad", interrupt_response=True)` and
-sets nothing else, so the server defaults apply — `threshold 0.5`,
-`silence_duration_ms 500`. With **two people talking to each other** that is far
-too eager: observed 2026-08-30, the reply was cancelled every 1–2 s and the user
-transcript grew into one runaway sentence. `launch_patched.py` patch 4
-overrides it; all four knobs are env vars, so they can be retuned in the room
-and the service restarted, with no redeploy:
-
-| env | default here | upstream/server default |
-|---|---|---|
-| `MEMOIRE_VAD_THRESHOLD` | `0.7` | 0.5 |
-| `MEMOIRE_VAD_SILENCE_MS` | `1200` | 500 |
-| `MEMOIRE_VAD_PREFIX_MS` | `300` | 300 |
-| `MEMOIRE_VAD_INTERRUPT` | `0` (off) | on |
-
-Startup logs the applied values: `VAD: threshold=0.7 silence=1200ms interrupt=False`.
-Still barging in → raise the threshold. Feels sluggish / lets you ramble →
-lower `MEMOIRE_VAD_SILENCE_MS`.
-
-## Wifi: getting the robot onto a new network, headless
-
-The robot falls back to its own AP (`reachy-mini-ap`, password `reachy-mini`,
-`10.42.0.1`) whenever no known network is in range — **silently**: from the
-laptop it looks exactly like a robot that is off. A wifi scan showing
-`reachy-mini-ap` is the tell.
-
-The documented way back is the dashboard in a browser. The headless way is
-`POST /wifi/connect` on the daemon, wrapped here:
+**On the robot (the real deployment: power on, and it runs).** From a computer
+on the same network:
 
 ```bash
-HOTSPOT_PSK='...' ./scripts/provision_hotspot.sh 'My Network'
-```
-
-It joins the AP, pushes the credentials, rejoins your network, then sweeps for
-the robot and prints `/wifi/status` + `:7870/health`. The machine running it is
-**offline for the middle of the round trip**, which is why it logs to
-`logs/provision-*.log` rather than expecting anyone to watch it. Arg 1 must be
-both the SSID to teach the robot and the name of the saved NetworkManager
-profile to return to.
-
-## The hub (family remote + caregiver dashboard)
-
-A second web server runs **inside the same process** on port **7870** (started
-by `run.sh` automatically). It is deliberately separate from the upstream UI
-on :7860: the hub is token-authenticated and is the only thing you may ever
-expose to the internet.
-
-- **`/famille`** — phone page for a remote relative, designed senior-first
-  (three huge buttons, big type, one thing at a time):
-  - **🎙️ voice message**: tap, speak, tap — her *actual voice* plays on the
-    robot's speaker (MediaRecorder upload → ffmpeg → WAV → daemon
-    `play_sound`), prefixed by a short "Message de X." announcement.
-    Needs HTTPS (funnel) or localhost — browsers block the mic on plain HTTP.
-  - **👁 watch**: camera snapshot every 2.5 s; Reachy announces who is watching.
-  - **✏️ written message**: spoken **verbatim** on the robot speaker via
-    edge-tts (default voice `fr-FR-DeniseNeural`, override `MEMOIRE_TTS_VOICE`;
-    synth cached in `data/tts_cache/`). `{"mode": "ai"}` on `/api/say` keeps
-    the old behavior (injected turn, the model voices it in its own voice).
-  Add-to-homescreen on iPhone/Android → feels like an app.
-- **`/care`** — caregiver dashboard: conversation volume per day, mood entries,
-  the day's care journal, and **repeated questions/phrases over 30 days with a
-  week-over-week trend** — the honest "what is he forgetting" signal (fuzzy
-  clustering of his own words, no model opinions).
-- **Transcript logging** — every final user/assistant turn is stored in
-  `data/memoire.db` (`transcript` table). This is the analytics substrate;
-  it starts accumulating from the first run.
-
-### Access control
-
-```bash
-.venv/bin/python scripts/make_tokens.py mamie celine   # prints share URLs
-```
-
-Tokens live in `data/hub_tokens.json` (gitignored). Opening
-`/famille?t=<token>` once stores it as a cookie on the phone. Per-person rate
-limits on say/snapshot/voice; `/api/say` capped at 400 chars, voice uploads
-at 8 MB.
-
-### Remote access (family outside the LAN)
-
-```bash
-./scripts/expose.sh                 # Tailscale Funnel of :7870 (preferred)
-./scripts/expose.sh --cloudflared   # ephemeral fallback URL
-```
-
-Then regenerate share links with `--base-url <public url>`. **Never tunnel
-:7860** — the upstream UI has no auth. (Funnel path not yet live-tested;
-tailscale isn't installed on this laptop.)
-
-## Setup
-
-1. Install the upstream app (SDK first, per its README):
-
-   ```bash
-   uv venv --python python3.12 .venv && source .venv/bin/activate
-   uv pip install git+https://github.com/pollen-robotics/reachy_mini_conversation_app edge-tts
-   ```
-
-   `ffmpeg` must be on PATH (hub TTS + voice-message conversion).
-
-2. Authenticate: `hf auth login` (or `export HF_TOKEN=...`).
-
-3. Run (robot daemon must be up; use `reachy-mini-daemon --sim` for desk dev):
-
-   ```bash
-   ./run.sh --ui          # Gradio UI on :7860
-   ./run.sh --no-camera   # audio-only
-   ```
-
-## Robot-side install (standalone: power on → memoire runs)
-
-This is the deployment mode that matters outside the lab — a phone hotspot and
-a power cable, no laptop anywhere. The app runs **on the Raspberry Pi inside
-the robot**, as a systemd service, alongside (never replacing)
-`reachy-mini-daemon.service`.
-
-```bash
-# one command, from the laptop, idempotent — re-run it to update the robot
-ssh pollen@reachy-mini.local \
-  "HF_TOKEN=$(cat ~/.cache/huggingface/token) ROBOT_SUDO_PASS=root bash -s" \
+ssh pollen@reachy-mini.local "HF_TOKEN=hf_... ROBOT_SUDO_PASS=root bash -s" \
   < scripts/install_on_robot.sh
-
-# runtime state that is NOT in git (hub tokens, canned phrases, the journal)
-rsync -av data/hub_tokens.json data/phrases.json data/memoire.db \
-      pollen@reachy-mini.local:/home/pollen/reachy-memoire/data/
 ```
 
-After a wipe there is no local clone to pipe from, so pull the script straight
-from GitHub instead:
+That installs Mémoire next to the robot's own software, never replacing it, as
+a service that starts at boot. About 70 s after power-on, Reachy greets you.
+Full guide: [docs/install-on-robot.md](docs/install-on-robot.md).
+
+**From a laptop (development).** The robot must be on the same network, or use
+the simulator with `reachy-mini-daemon --sim`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BelCorentin/reachy-memoire/master/scripts/install_on_robot.sh \
-  | ssh pollen@reachy-mini.local "HF_TOKEN=hf_... ROBOT_SUDO_PASS=root bash -s"
+uv venv --python 3.12 .venv
+uv pip install --python .venv git+https://github.com/pollen-robotics/reachy_mini_conversation_app edge-tts
+hf auth login                      # or export HF_TOKEN=...
+./run.sh                           # add --ui for the upstream web UI on :7860
 ```
 
-What it does: `apt install ffmpeg` · clone to `/home/pollen/reachy-memoire` ·
-`uv venv --python 3.12` + install the upstream app and `edge-tts` ·
-write `/etc/reachy-memoire.env` · install and enable
-`reachy-memoire.service` · wait for `:7870/health`.
-
-**Secrets never go in git.** `HF_TOKEN` lives in `/etc/reachy-memoire.env`
-(root-owned, 0600), referenced by the unit's `EnvironmentFile`. Without a
-token the service still starts and the hub answers, but the realtime session
-cannot open. Rotate it with:
+`ffmpeg` must be installed. Then create a link for a family member:
 
 ```bash
-ssh pollen@reachy-mini.local "echo 'HF_TOKEN=hf_...' | sudo tee /etc/reachy-memoire.env" \
-  && ssh pollen@reachy-mini.local "sudo systemctl restart reachy-memoire"
+.venv/bin/python scripts/make_tokens.py mamie    # prints the /famille and /care URLs
 ```
 
-### The unit
+## Status
 
-`scripts/reachy-memoire.service` runs `run.sh` as `pollen` with
-`REACHY_HOST=REACHY_SIGNALLING_HOST=127.0.0.1`. On the robot the daemon is on
-loopback, which sidesteps the `wlan_ip` signalling bug entirely and works even
-before wifi associates.
+| | verified on the real robot | how |
+|---|---|---|
+| Conversation, French greeting, camera, tools loading | ✅ 17 Aug 2026 | bring-up |
+| Hub: camera snapshot, "say" pipeline to the speaker, transcript logging | ✅ 23 Aug 2026 | from a laptop after a reboot |
+| Face seeking: sweep, face found, body anchored | ✅ 19 Aug 2026 | live |
+| Runs at boot with no laptop (greeting at +68 s) | ✅ 23 Aug 2026 | real reboot |
+| `grandsparents` profile + turn-detection tuning | ✅ 30 Aug 2026 | at my grandparents' home |
+| Hearing hub messages from the speaker in the room | ⬜ | pipeline verified, sound not checked by ear |
+| Recording a voice message from a phone | ⬜ | needs HTTPS (tunnel), never tested end to end |
+| Access from outside the home (`scripts/expose.sh`, Tailscale Funnel) | ⬜ | written, never tested |
+| Model keeps the journal unprompted in `memoire` profile | ⬜ | not observed in a long conversation |
 
-`After=reachy-mini-daemon.service` only orders unit *start* — the daemon's REST
-API answers tens of seconds later, and it always boots with motors disabled.
-So `ExecStartPre=scripts/wait_for_daemon.sh` polls `/api/daemon/status` until
-`state: running` (180 s budget), then does the media-acquire and motors-enable
-preflights. `Restart=on-failure`, `RestartSec=10`.
-
-Note the app's own inactivity timeout is 24 h
-(`REACHY_MINI_APP_TIMEOUT_MINUTES`); when it fires, the app exits *cleanly*, so
-`on-failure` deliberately does not restart it — same for the voice
-"endors-toi" tool. `sudo systemctl restart reachy-memoire` wakes it back up.
-
-### Day-to-day on the robot
+The hub and the face seeker have tests that need no robot and no network:
 
 ```bash
-sudo systemctl status  reachy-memoire     # is it up
-journalctl -u reachy-memoire -f           # live logs (also logs/latest.log)
-sudo systemctl restart reachy-memoire     # after changing the env file
-curl -s http://reachy-mini.local:7870/health   # from any LAN machine
+uv run --no-project --with fastapi --with httpx --with python-multipart python tests/test_hub.py
+uv run --no-project --with numpy python tests/test_seeker.py
 ```
 
-Family/care links are the same as before, on the robot's own address:
-`http://reachy-mini.local:7870/famille?t=<token>`. Regenerate them with
-`scripts/make_tokens.py --base-url http://reachy-mini.local:7870`.
-Only :7870 may ever be exposed beyond the LAN — :7860 has no auth, and the
-service does not start the Gradio UI at all.
+## Privacy
 
-### Demo-day checklist (robot only, phone hotspot)
+This app listens in someone's home and holds sensitive data about a vulnerable
+person. Read [docs/privacy.md](docs/privacy.md) before installing it for
+someone else. In short:
 
-1. Turn the hotspot on **first**, then power the robot — it auto-joins any
-   network already in `curl http://reachy-mini.local:8000/wifi/status`
-   (`known_networks`). A new hotspot has to be added once from the robot's
-   own AP (10.42.0.1) or the dashboard on :8000.
-2. Wait ~70 s. Measured on a cold boot: daemon REST ready at +18 s, service
-   active at +34 s, realtime session open and greeting spoken at +68 s.
-3. From a phone on the same hotspot: `http://reachy-mini.local:7870/health`
-   should return `{"ok":true,"session":true}`. `session:false` means the
-   HF realtime connection did not open — check `HF_TOKEN` and internet.
-4. The robot needs internet the whole time: inference is HF cloud, and the
-   hub's TTS calls Microsoft edge-tts. No internet = no speech at all.
+- speech goes to the Hugging Face realtime backend;
+- transcripts, journal and tasks stay on the robot in SQLite;
+- the camera is only viewed remotely on request, and Reachy says out loud who is
+  looking;
+- only the token-protected hub port (7870) may ever be exposed.
 
-## Operations (laptop-driven, no desktop app needed)
+## Documentation
 
-The Pollen desktop app is **only** a convenience for wifi provisioning and app
-management — nothing here depends on it. Everything talks straight to the
-robot's daemon (REST + WebSocket on port 8000, autostarted at boot by
-`reachy-mini-daemon.service`).
-
-**Every startup is just:**
-
-1. Power the robot on. It auto-joins any known wifi (list at
-   `http://<robot>:8000/wifi/status`); if none is reachable it falls back to
-   its own hotspot (10.42.0.x) where you provision wifi once via the built-in
-   dashboard on port 8000 — no desktop app required.
-2. `./run.sh --ui` on the laptop. The script resolves the robot, wakes the
-   daemon's media stack, applies the signalling workaround, and starts the
-   conversation app (web UI + transcript at http://localhost:7860).
-
-Wifi is required only for laptop↔robot transport and the HF cloud backend —
-the robot has no other network dependency at runtime.
-
-**Verified working (2026-08-17):** robot connection, WebRTC bidirectional
-audio, camera (`scripts/camera_check.py` grabs a JPEG frame), profile +
-journal tools loading, realtime session + French greeting.
-
-### Known gotchas
-
-- Daemon 1.8.3 reports its **hotspot IP** (10.42.0.1) as `wlan_ip` even when
-  on home wifi → the SDK dials WebRTC signalling on an unroutable address and
-  times out. `run.sh` works around it via `REACHY_SIGNALLING_HOST` +
-  `scripts/launch_patched.py`.
-- If WebRTC still times out, check the signalling server:
-  `curl -X POST http://<robot>:8000/api/media/acquire` then verify port 8443
-  is open.
-- **Robot daemon boots with motors disabled** (`motor_control_mode: disabled`,
-  no error anywhere) — the head just doesn't move. Enable with
-  `curl -X POST http://<robot>:8000/api/motors/set_mode/enabled`.
-- **Face tracking needs daemon ≥ 1.9.0.** On 1.8.3 the `SetHeadTrackingCmd`
-  is silently ignored (`get_tracked_face()` returns `detected=False, ts=None`
-  forever, no version error). Robot updated to 1.9.0 on 2026-08-18 via
-  `curl -X POST http://<robot>:8000/update/start` — note the update routes are
-  **unprefixed** (`/update/...`, not `/api/update/...`). Motors come back
-  disabled after the update (see above).
-- **After a daemon self-update, restart the daemon** (`POST /api/daemon/restart`).
-  The post-update state can be wedged: every command is accepted (goto returns a
-  uuid, `nb_error: 0`, no log errors) but nothing physically moves — encoders
-  frozen, `/api/move/running` always empty, `write_dt ~0.07ms` in
-  `control_loop_stats` (healthy is ~0.4ms). Restart + re-enable motors fixes it.
-- **"Command accepted" ≠ "robot moved".** The only ground truth is reading
-  encoders back (`/api/state/present_head_pose` before/after, or
-  `get_current_joint_positions()`). SDK calls returning cleanly proves nothing.
-- SDK 1.10.0rc5 vs daemon 1.9.0 version-mismatch warning is benign so far
-  (motion, tracking commands, and `play_sound` all verified).
-
-## Where things are logged / stored
-
-| What | Where |
-|---|---|
-| App run logs (full console output) | `logs/run-<timestamp>.log` (+ `logs/latest.log` symlink), gitignored |
-| Care journal (visits, meals, meds, mood) | `data/memoire.db` (SQLite), gitignored |
-| Conversation transcripts (final turns) | `data/memoire.db`, `transcript` table |
-| Hub access tokens / canned phrases | `data/hub_tokens.json` / `data/phrases.json`, gitignored |
-| TTS cache / voice messages | `data/tts_cache/` / `data/voicemail/`, gitignored |
-| Long-term facts (`remember` tool) | `~/.local/share/reachy_mini_conversation_app/memory.v1.json` |
-| Robot-side daemon logs | on the robot: `journalctl -u reachy-mini-daemon` (ssh `pollen@reachy-mini.local`) |
-
-The loaner robot gets wiped at loan end — nothing irreplaceable lives on it;
-everything above is laptop-side except the daemon logs.
+- [Install on the robot](docs/install-on-robot.md): service, day-to-day use,
+  putting the robot on a new Wi-Fi network without a screen, demo checklist
+- [Family hub](docs/family-hub.md): pages, access tokens, remote access
+- [Configuration](docs/configuration.md): every environment variable
+- [Troubleshooting](docs/troubleshooting.md): known robot/SDK pitfalls, where
+  logs and data live
+- [Privacy](docs/privacy.md)
+- [Upstream changes](docs/upstream.md): what would let us delete the hooks
+- [Design notes](docs/design-notes.md): decisions and dated development log
 
 ## Roadmap
 
-See `plan.md`.
+- Package as a Reachy Mini app-store app.
+- English profile, translatable hub pages.
+- Proactive reminders ("today you have…"). Upstream is reactive-only.
+- Local inference on the home network, so no audio leaves the house.
+- Live video and two-way calls on `/famille`.
+
+## Credits and licence
+
+By Corentin Bel, on a Reachy Mini lent by
+[Pollen Robotics](https://www.pollen-robotics.com/). Built on
+`reachy_mini_conversation_app` and the `reachy_mini` SDK (Pollen Robotics /
+Hugging Face). Licensed under [Apache 2.0](LICENSE).

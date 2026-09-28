@@ -1,4 +1,13 @@
-# Plan / decisions
+# Design notes
+
+Decisions, upstream facts this app relies on, and a dated development log,
+kept as written at the time. For how to use the app, start from the
+[README](../README.md).
+
+> Note (2026-09-28): the laptop-era host and signalling overrides mentioned in
+> older entries were removed. They only served daemon 1.8.3, and on the robot
+> the SDK connects to localhost by itself. The launcher, formerly
+> `scripts/launch_patched.py`, is now `scripts/launch.py`.
 
 ## Approach
 
@@ -35,7 +44,7 @@ Constraints from upstream loader (`core_tools.py`):
 
 In-process FastAPI on **:7870** (own port on purpose: it is the ONLY thing a
 tunnel may expose — the upstream UI on :7860 has no auth). Wired by
-`scripts/launch_patched.py` wrapping `LocalStream`:
+`scripts/launch.py` wrapping `LocalStream`:
 
 - `__init__` wrap → captures the live stream (handler + robot refs) and starts
   the hub uvicorn thread once.
@@ -162,7 +171,7 @@ Ask: robot should turn around to look for humans, then look at them.
   legs, anchor body there (tracker owns the head). Empty full sweep →
   recenter + 90 s cooldown.
 - Upstream `BreathingMove.evaluate` hardcodes `body_yaw=0.0` (body would snap
-  to center between moves) → `launch_patched.py` patches it to return
+  to center between moves) → `scripts/launch.py` patches it to return
   `seeker.hold_yaw`.
 - Startup: tracking auto-enabled (`MEMOIRE_HEAD_TRACKING=0` to disable);
   sweep disabled with `MEMOIRE_SEEK=0`.

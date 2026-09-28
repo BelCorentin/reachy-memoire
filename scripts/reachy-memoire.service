@@ -18,10 +18,9 @@ EnvironmentFile=-/etc/reachy-memoire.env
 
 Environment=HOME=/home/pollen
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-# On the robot itself the daemon is on loopback — no mDNS, no wlan_ip bug
-# (Field Log #5), works even before/without wifi.
+# The daemon is on loopback: used by the preflights in wait_for_daemon.sh and
+# run.sh (the SDK finds localhost by itself). Works even before wifi is up.
 Environment=REACHY_HOST=127.0.0.1
-Environment=REACHY_SIGNALLING_HOST=127.0.0.1
 Environment=MEMOIRE_HUB_PORT=7870
 # Same malloc cap the daemon uses on the 4 GB Pi.
 Environment=MALLOC_ARENA_MAX=2

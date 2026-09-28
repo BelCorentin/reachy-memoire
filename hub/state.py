@@ -10,7 +10,7 @@ class HubState:
     """References into the live conversation-app process."""
 
     def __init__(self) -> None:
-        self.stream: Optional[Any] = None  # LocalStream, attached by launch_patched
+        self.stream: Optional[Any] = None  # LocalStream, attached by scripts/launch.py
         self.run_id: str = datetime.now().isoformat(timespec="seconds")
         self._lock = threading.Lock()
 

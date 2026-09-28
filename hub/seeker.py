@@ -5,13 +5,13 @@ the head can only deviate ~65 deg from the body. So when nobody is in frame,
 this module slowly sweeps the body yaw in widening legs until the tracker
 reports a face again, then anchors the body where the person was found.
 
-Integration (see scripts/launch_patched.py):
+Integration (see scripts/launch.py):
 - ``FaceSeeker`` is a daemon thread polling ``robot.get_tracked_face``.
 - Scan legs are queued as regular ``Move`` objects on the upstream
   ``MovementManager`` queue, so they compose with breathing/emotions instead of
   fighting the 60 Hz control loop.
 - Upstream ``BreathingMove`` hard-codes ``body_yaw=0.0`` (the body would snap
-  back to center after every move); launch_patched patches its ``evaluate`` to
+  back to center after every move); the launcher patches its ``evaluate`` to
   return ``seeker.hold_yaw`` instead, so the body stays facing the person.
 
 Env knobs:

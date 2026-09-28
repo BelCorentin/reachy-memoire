@@ -14,40 +14,22 @@ export MEMOIRE_DB_PATH="${MEMOIRE_DB_PATH:-$ROOT/data/memoire.db}"
 export MEMOIRE_HUB_PORT="${MEMOIRE_HUB_PORT:-7870}"
 
 if [[ ! -f "$ROOT/data/hub_tokens.json" ]]; then
-  echo "note: no hub tokens yet — famille/care pages need one:" >&2
-  echo "      $ROOT/.venv/bin/python scripts/make_tokens.py mamie" >&2
+  echo "note: no hub tokens yet — the family/care pages need one:" >&2
+  echo "      $ROOT/.venv/bin/python scripts/make_tokens.py <name>" >&2
 fi
 
 # HF_TOKEN: export it yourself or rely on `hf auth login` cache.
 
-# Resolve the robot. mDNS goes cold after robot/daemon restarts, and under
-# `set -e` a failed $(getent) in an assignment would kill the script silently —
-# so every lookup is || true and we fall back to the last known-good IP.
-ROBOT_HOST="${REACHY_HOST:-}"
-if [[ -z "$ROBOT_HOST" ]]; then
-  ROBOT_HOST="$(getent hosts reachy-mini.local 2>/dev/null | awk '{print $1; exit}' || true)"
-fi
-if [[ -z "$ROBOT_HOST" && -f "$ROOT/.last_robot_ip" ]]; then
-  CAND="$(cat "$ROOT/.last_robot_ip")"
-  if curl -s -m3 "http://$CAND:8000/api/daemon/status" >/dev/null 2>&1; then
-    ROBOT_HOST="$CAND"
-    echo "mDNS cold — using last known robot IP $ROBOT_HOST"
-  fi
-fi
-if [[ -z "$ROBOT_HOST" ]]; then
-  echo "Cannot resolve reachy-mini.local — is the robot on and on the same wifi?" >&2
-  echo "(Set REACHY_HOST=<ip> to skip mDNS.)" >&2
+# Where the daemon is, for the two preflights below. The app itself finds the
+# robot on its own (the SDK tries localhost first, then reachy-mini.local).
+# On the robot the systemd unit sets REACHY_HOST=127.0.0.1.
+ROBOT_HOST="${REACHY_HOST:-reachy-mini.local}"
+if ! curl -s -m5 "http://$ROBOT_HOST:8000/api/daemon/status" >/dev/null; then
+  echo "No Reachy Mini daemon at $ROBOT_HOST:8000 — is the robot on and on this network?" >&2
+  echo "From a laptop the app needs reachy-mini.local to resolve (mDNS can be" >&2
+  echo "slow after a robot reboot: wait and retry). See docs/troubleshooting.md." >&2
   exit 1
 fi
-echo "$ROBOT_HOST" > "$ROOT/.last_robot_ip"
-
-# The SDK inside the app defaults to "reachy-mini.local"; hand it the resolved
-# address so cold mDNS can't break the connection (launch_patched reads this).
-export REACHY_HOST="$ROBOT_HOST"
-
-# Daemon 1.8.3 reports its hotspot IP as wlan_ip → SDK dials the WebRTC
-# signalling server on an unroutable address (Field Log #5). Force the real one.
-export REACHY_SIGNALLING_HOST="${REACHY_SIGNALLING_HOST:-$ROBOT_HOST}"
 
 # Preflight: make sure the daemon's media stack (WebRTC signalling :8443) is up.
 curl -s -m5 -X POST "http://$ROBOT_HOST:8000/api/media/acquire" >/dev/null || true
@@ -65,4 +47,4 @@ LOG="$ROOT/logs/run-$(date +%F-%H%M%S).log"
 ln -sf "$(basename "$LOG")" "$ROOT/logs/latest.log"
 echo "Robot: $ROBOT_HOST · Log: $LOG · Hub: http://localhost:$MEMOIRE_HUB_PORT"
 
-"$PY" "$ROOT/scripts/launch_patched.py" "$@" 2>&1 | tee "$LOG"
+"$PY" "$ROOT/scripts/launch.py" "$@" 2>&1 | tee "$LOG"
