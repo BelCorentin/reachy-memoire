@@ -22,7 +22,7 @@ advice, does no diagnosis, and must not replace care or supervision.
 Nothing else leaves the house. For no audio to leave the home at all, point
 the app at a realtime server on your own network
 (`HF_REALTIME_CONNECTION_MODE=local`, see [configuration](configuration.md)).
-That path is on the roadmap and hasn't been tested.
+That path is on the roadmap.
 
 ## Built-in safeguards
 

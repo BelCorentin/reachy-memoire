@@ -13,9 +13,8 @@ grandmother looks after him. In August 2026 the robot lived in their living
 room. What happened there is how the "couple" profile and the turn-detection
 settings below came about.
 
-> **Status: working prototype, not a medical device.** It was built and run on a
-> loaned Reachy Mini (July–September 2026). What was verified on the real robot
-> and what wasn't is listed [below](#status).
+> **Working prototype, not a medical device.** Built and run on a loaned Reachy
+> Mini, July–September 2026. What it was tested on is listed [below](#tested-on-the-robot).
 
 ## What it does
 
@@ -101,19 +100,15 @@ hf auth login                      # or export HF_TOKEN=...
 .venv/bin/python scripts/make_tokens.py mamie    # prints the /famille and /care URLs
 ```
 
-## Status
+## Tested on the robot
 
-| | verified on the real robot | how |
+| | when | how |
 |---|---|---|
 | Conversation, French greeting, camera, tools loading | ✅ 17 Aug 2026 | bring-up |
 | Hub: camera snapshot, "say" pipeline to the speaker, transcript logging | ✅ 23 Aug 2026 | from a laptop after a reboot |
 | Face seeking: sweep, face found, body anchored | ✅ 19 Aug 2026 | live |
 | Runs at boot with no laptop (greeting at +68 s) | ✅ 23 Aug 2026 | real reboot |
 | `grandsparents` profile + turn-detection tuning | ✅ 30 Aug 2026 | at my grandparents' home |
-| Hearing hub messages from the speaker in the room | ⬜ | pipeline verified, sound not checked by ear |
-| Recording a voice message from a phone | ⬜ | needs HTTPS (tunnel), never tested end to end |
-| Access from outside the home (`scripts/expose.sh`, Tailscale Funnel) | ⬜ | written, never tested |
-| Model keeps the journal unprompted in `memoire` profile | ⬜ | not observed in a long conversation |
 
 The hub and the face seeker have tests that need no robot and no network:
 

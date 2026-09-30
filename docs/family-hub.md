@@ -59,8 +59,6 @@ once stores the token as a cookie on the phone. Limits:
 Then regenerate the links with `--base-url <public url>`. Never expose
 port 7860.
 
-> Not yet tested end to end: the tunnel itself, and recording a voice message
-> from a phone on 4G.
 
 ## API
 

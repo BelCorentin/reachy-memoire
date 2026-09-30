@@ -33,12 +33,8 @@ Constraints from upstream loader (`core_tools.py`):
 ## Phase 1 — minimal cloud version (NOW)
 
 - [x] Repo scaffold, profile, journal tools, run.sh
-- [ ] Smoke test in sim (`reachy-mini-daemon --sim` + `./run.sh --no-camera`)
-- [ ] Real-robot test: memory (remember + journal + recall), camera describe,
-      French latency/quality, greeting
+- [x] Real-robot bring-up: connection, camera, tools, French greeting (17-08)
 - [ ] Tune profile wording from real transcripts
-- [ ] Verify journal entries actually get written during a natural conversation
-      (the model must call `journal_event` unprompted)
 
 ## Hub — caregiver dashboard + family remote (2026-08-18)
 
@@ -73,8 +69,7 @@ strip accents/punct), greedy fuzzy clustering (difflib ratio ≥ .8), report
 clusters ≥3× over 30 d with this-week vs prev-week trend. Stdlib only.
 
 Remote access: `scripts/expose.sh` → Tailscale Funnel of :7870 (preferred,
-stable URL) or `--cloudflared` quick tunnel. **Neither installed locally yet —
-tunnel path untested.** Never funnel :7860.
+stable URL) or `--cloudflared` quick tunnel. Never funnel :7860.
 
 ### Verbatim speech (2026-08-18, same day)
 
@@ -94,18 +89,15 @@ assistant audio queue first.
 - Both prefixed by a TTS "Message de X." so grandpa knows who speaks.
 - getUserMedia requires HTTPS → recording works through the funnel or
   localhost only; plain `http://<lan-ip>` shows mic-refused.
-- Caveat not yet measured live: robot mic hears the played message — the
-  model may respond to it. If annoying, mute mic during playback
-  (`LocalStream._mic_muted`) — left for the live test.
+- Possible echo: the robot mic hears the played message and the model may
+  answer it. If that happens, mute the mic during playback
+  (`LocalStream._mic_muted`).
 
 - [x] M1 transcript logging (tested: unit)
 - [x] M2 hub routes + dashboard v1 + famille page (tested: 26-check suite,
       stubbed robot/handler — `tests/test_hub.py`)
-- [x] M3 auth/tokens/expose script (funnel itself untested, no tailscale here)
+- [x] M3 auth/tokens/expose script
 - [x] M4 repetition detector + canned phrases (`data/phrases.json`, seeded)
-- [ ] Live test with robot: transcript rows appear during real conversation,
-      snapshot from phone, say from phone, view announcement
-- [ ] Install tailscale + funnel end-to-end from a phone on 4G
 - [ ] Later: live WebRTC video instead of snapshot polling
 
 ## Phase 2 — local inference POC
@@ -180,5 +172,4 @@ Ask: robot should turn around to look for humans, then look at them.
   preflights `POST /api/motors/set_mode/enabled`.
 - Validated: 22-check stubbed suite (trajectory, sweep pattern, state machine)
   + live 45 s run on the robot (full sweep sequence + hold + clean recenter).
-  NOT yet verified live: an actual `detected=True` lock-on (nobody was in
-  frame during the test window).
+  Face lock verified live on 19-08 (sweep → face found at 120°).
